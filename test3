@@ -1,0 +1,200 @@
+-- Boombox (ID 212641536) cho Delta X
+-- Lưu ý: script chạy phía client nên chỉ bạn nghe được nhạc.
+
+local Players = game:GetService("Players")
+local UIS = game:GetService("UserInputService")
+local lp = Players.LocalPlayer
+
+local ITEM_ID = 212641536
+local state = {speed = 1, bass = 0, vol = 1, id = "", locked = false, pos = 0, playing = false}
+
+-- ===== Lấy item =====
+local okGet, objs = pcall(function() return game:GetObjects("rbxassetid://" .. ITEM_ID) end)
+local tool = okGet and objs and objs[1]
+if not tool or not tool:IsA("Tool") then
+    warn("Không tải được boombox!")
+    return
+end
+for _, d in ipairs(tool:GetDescendants()) do
+    if d:IsA("Sound") or d:IsA("LuaSourceContainer") then d:Destroy() end
+end
+tool.Name = "Boombox"
+tool.CanBeDropped = false
+
+-- ===== Âm thanh (1 Sound duy nhất, luôn phát dù cầm hay không) =====
+local sound = Instance.new("Sound")
+sound.Name = "BoomSound"
+sound.Looped = true
+sound.RollOffMaxDistance = 80
+local eq = Instance.new("EqualizerSoundEffect")
+eq.HighGain = 0; eq.MidGain = 0; eq.LowGain = 0
+eq.Parent = sound
+
+-- ===== Treo ở lưng =====
+local prop, weld
+local function setProp(vis)
+    if not prop then return end
+    for _, p in ipairs(prop:GetDescendants()) do
+        if p:IsA("BasePart") then p.LocalTransparencyModifier = vis and 0 or 1 end
+    end
+    if prop:IsA("BasePart") then prop.LocalTransparencyModifier = vis and 0 or 1 end
+end
+
+local function buildProp(char)
+    if prop then prop:Destroy() end
+    local handle = tool:FindFirstChild("Handle")
+    local torso = char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso")
+    if not handle or not torso then return end
+    prop = handle:Clone()
+    prop.Name = "BoomBack"
+    prop.CanCollide = false
+    prop.Massless = true
+    prop.Anchored = false
+    prop.Parent = char
+    weld = Instance.new("Weld")
+    weld.Part0 = torso
+    weld.Part1 = prop
+    weld.C0 = CFrame.new(0, 0, 0.8) * CFrame.Angles(0, math.rad(180), 0)
+    weld.Parent = prop
+    local wasPlaying = state.playing
+    sound.Parent = prop
+    sound.TimePosition = state.pos
+    if wasPlaying then sound:Play() end
+    setProp(tool.Parent ~= char)
+end
+
+local function attach(char)
+    local bp = lp:WaitForChild("Backpack")
+    tool.Parent = bp
+    char:WaitForChild("Humanoid")
+    task.wait(0.3)
+    buildProp(char)
+end
+
+tool.Equipped:Connect(function() setProp(false) end)
+tool.Unequipped:Connect(function() setProp(true) end)
+
+lp.CharacterAdded:Connect(attach)
+lp.CharacterRemoving:Connect(function()
+    state.pos = sound.TimePosition
+    state.playing = sound.Playing
+end)
+
+-- ===== GUI =====
+local parentGui = (gethui and gethui()) or game:GetService("CoreGui")
+local old = parentGui:FindFirstChild("BoomGui"); if old then old:Destroy() end
+
+local gui = Instance.new("ScreenGui")
+gui.Name = "BoomGui"; gui.ResetOnSpawn = false; gui.Parent = parentGui
+
+local function corner(o, r) local c = Instance.new("UICorner", o); c.CornerRadius = UDim.new(0, r or 8) end
+
+local function btn(parent, text, pos, size, color)
+    local b = Instance.new("TextButton")
+    b.Text = text; b.Position = pos; b.Size = size
+    b.BackgroundColor3 = color or Color3.fromRGB(60, 60, 75)
+    b.TextColor3 = Color3.new(1, 1, 1); b.Font = Enum.Font.GothamBold; b.TextSize = 14
+    b.Parent = parent; corner(b); return b
+end
+
+local function label(parent, text, y)
+    local l = Instance.new("TextLabel")
+    l.Text = text; l.Position = UDim2.new(0, 10, 0, y); l.Size = UDim2.new(0.5, -10, 0, 28)
+    l.BackgroundTransparency = 1; l.TextColor3 = Color3.new(1, 1, 1)
+    l.Font = Enum.Font.Gotham; l.TextSize = 13; l.TextXAlignment = Enum.TextXAlignment.Left
+    l.Parent = parent; return l
+end
+
+local function input(parent, default, y)
+    local t = Instance.new("TextBox")
+    t.Text = tostring(default); t.Position = UDim2.new(0.5, 0, 0, y); t.Size = UDim2.new(0.5, -10, 0, 28)
+    t.BackgroundColor3 = Color3.fromRGB(45, 45, 58); t.TextColor3 = Color3.new(1, 1, 1)
+    t.Font = Enum.Font.Gotham; t.TextSize = 13; t.ClearTextOnFocus = false
+    t.Parent = parent; corner(t, 6); return t
+end
+
+-- Nút mở/đóng
+local toggle = btn(gui, "🔊", UDim2.new(0, 10, 0.5, -20), UDim2.new(0, 40, 0, 40), Color3.fromRGB(90, 70, 200))
+corner(toggle, 20)
+
+-- Khung chính
+local main = Instance.new("Frame")
+main.Size = UDim2.new(0, 250, 0, 300); main.Position = UDim2.new(0.5, -125, 0.5, -150)
+main.BackgroundColor3 = Color3.fromRGB(30, 30, 40); main.Parent = gui; corner(main, 12)
+
+local lock = btn(main, "🔓", UDim2.new(0, 6, 0, 6), UDim2.new(0, 28, 0, 28))
+local title = Instance.new("TextLabel")
+title.Text = "BOOMBOX"; title.Size = UDim2.new(1, -80, 0, 40); title.Position = UDim2.new(0, 40, 0, 0)
+title.BackgroundTransparency = 1; title.TextColor3 = Color3.new(1, 1, 1)
+title.Font = Enum.Font.GothamBold; title.TextSize = 16; title.Parent = main
+local close = btn(main, "X", UDim2.new(1, -34, 0, 6), UDim2.new(0, 28, 0, 28), Color3.fromRGB(190, 60, 60))
+
+label(main, "ID nhạc", 50);       local idBox = input(main, "", 50)
+label(main, "Tốc độ (0.1-5)", 88);  local spBox = input(main, 1, 88)
+label(main, "Bass (-80 → 10)", 126); local bsBox = input(main, 0, 126)
+label(main, "Âm lượng (0-10)", 164); local vlBox = input(main, 1, 164)
+
+local playBtn = btn(main, "▶ Phát", UDim2.new(0, 10, 0, 206), UDim2.new(0.5, -15, 0, 36), Color3.fromRGB(60, 150, 90))
+local pauseBtn = btn(main, "⏸ Tạm dừng", UDim2.new(0.5, 5, 0, 206), UDim2.new(0.5, -15, 0, 36), Color3.fromRGB(190, 140, 50))
+local stopBtn = btn(main, "⏹ Dừng hẳn", UDim2.new(0, 10, 0, 250), UDim2.new(1, -20, 0, 32), Color3.fromRGB(150, 60, 60))
+
+-- Chức năng
+local function applyAll()
+    sound.PlaybackSpeed = math.clamp(tonumber(spBox.Text) or 1, 0.1, 5)
+    eq.LowGain = math.clamp(tonumber(bsBox.Text) or 0, -80, 10)
+    sound.Volume = math.clamp(tonumber(vlBox.Text) or 1, 0, 10)
+end
+for _, b in ipairs({spBox, bsBox, vlBox}) do b.FocusLost:Connect(applyAll) end
+
+playBtn.MouseButton1Click:Connect(function()
+    applyAll()
+    local id = tostring(idBox.Text):gsub("%D", "")
+    if id ~= "" then
+        local new = "rbxassetid://" .. id
+        if sound.SoundId ~= new then sound.SoundId = new; sound.TimePosition = 0 end
+    end
+    sound:Play(); state.playing = true
+end)
+pauseBtn.MouseButton1Click:Connect(function()
+    if sound.Playing then
+        state.pos = sound.TimePosition; sound:Pause(); state.playing = false
+        pauseBtn.Text = "⏸ Tiếp tục"
+    else
+        sound:Resume(); state.playing = true; pauseBtn.Text = "⏸ Tạm dừng"
+    end
+end)
+stopBtn.MouseButton1Click:Connect(function()
+    sound:Stop(); state.playing = false; state.pos = 0
+end)
+
+close.MouseButton1Click:Connect(function() main.Visible = false end)
+toggle.MouseButton1Click:Connect(function() main.Visible = not main.Visible end)
+lock.MouseButton1Click:Connect(function()
+    state.locked = not state.locked
+    lock.Text = state.locked and "🔒" or "🔓"
+end)
+
+-- Kéo GUI (chuột + cảm ứng)
+local dragging, dStart, fStart
+main.InputBegan:Connect(function(i)
+    if state.locked then return end
+    if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+        dragging, dStart, fStart = true, i.Position, main.Position
+    end
+end)
+UIS.InputChanged:Connect(function(i)
+    if dragging and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then
+        local d = i.Position - dStart
+        main.Position = UDim2.new(fStart.X.Scale, fStart.X.Offset + d.X, fStart.Y.Scale, fStart.Y.Offset + d.Y)
+    end
+end)
+UIS.InputEnded:Connect(function(i)
+    if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+        dragging = false
+    end
+end)
+
+-- Khởi động
+task.spawn(function()
+    attach(lp.Character or lp.CharacterAdded:Wait())
+end)
