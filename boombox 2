@@ -1,0 +1,189 @@
+-- // Advanced Boombox System (Fixed Version)
+-- // Item ID: 212641536
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local CoreGui = game:GetService("CoreGui")
+
+local player = Players.LocalPlayer
+
+-- Dọn dẹp UI và Tool cũ nếu chạy lại script
+if player.Character and player.Character:FindFirstChild("BoomboxTool") then
+    player.Character.BoomboxTool:Destroy()
+end
+if player.Backpack:FindFirstChild("BoomboxTool") then
+    player.Backpack.BoomboxTool:Destroy()
+end
+pcall(function()
+    if player.PlayerGui:FindFirstChild("BoomboxGui") then
+        player.PlayerGui.BoomboxGui:Destroy()
+    end
+end)
+
+-- Tạo ScreenGui chính
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "BoomboxGui"
+screenGui.ResetOnSpawn = false
+screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+pcall(function()
+    screenGui.Parent = CoreGui
+end)
+if not screenGui.Parent then
+    screenGui.Parent = player.PlayerGui
+end
+
+-- Nút thu gọn / mở GUI (Có thể kéo thả)
+local toggleBtn = Instance.new("TextButton")
+toggleBtn.Name = "ToggleBtn"
+toggleBtn.Size = UDim2.new(0, 45, 0, 45)
+toggleBtn.Position = UDim2.new(0, 20, 0, 20)
+toggleBtn.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+toggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+toggleBtn.TextSize = 18
+toggleBtn.Font = Enum.Font.GothamBold
+toggleBtn.Text = "🎵"
+toggleBtn.Parent = screenGui
+Instance.new("UICorner", toggleBtn).CornerRadius = UDim.new(0, 10)
+
+-- Khung GUI chính
+local mainFrame = Instance.new("Frame")
+mainFrame.Name = "MainFrame"
+mainFrame.Size = UDim2.new(0, 320, 0, 470)
+mainFrame.Position = UDim2.new(0.5, -160, 0.5, -235)
+mainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+mainFrame.BorderSizePixel = 0
+mainFrame.Visible = true
+mainFrame.Parent = screenGui
+Instance.new("UICorner", mainFrame).CornerRadius = UDim.new(0, 12)
+
+-- Thanh tiêu đề chính (Dùng để kéo GUI)
+local topBar = Instance.new("Frame")
+topBar.Name = "TopBar"
+topBar.Size = UDim2.new(1, 0, 0, 40)
+topBar.BackgroundColor3 = Color3.fromRGB(35, 35, 42)
+topBar.BorderSizePixel = 0
+topBar.Parent = mainFrame
+Instance.new("UICorner", topBar).CornerRadius = UDim.new(0, 12)
+
+local titleLabel = Instance.new("TextLabel")
+titleLabel.Size = UDim2.new(1, -90, 1, 0)
+titleLabel.Position = UDim2.new(0, 15, 0, 0)
+titleLabel.BackgroundTransparency = 1
+titleLabel.Text = "BOOMBOX CONTROL"
+titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+titleLabel.Font = Enum.Font.GothamBold
+titleLabel.TextSize = 13
+titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+titleLabel.Parent = topBar
+
+-- Nút khóa di chuyển GUI (Góc trên bên phải)
+local lockBtn = Instance.new("TextButton")
+lockBtn.Name = "LockBtn"
+lockBtn.Size = UDim2.new(0, 32, 0, 32)
+lockBtn.Position = UDim2.new(1, -74, 0.5, -16)
+lockBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
+lockBtn.Text = "🔓"
+lockBtn.TextSize = 14
+lockBtn.Font = Enum.Font.Gotham
+lockBtn.Parent = topBar
+Instance.new("UICorner", lockBtn).CornerRadius = UDim.new(0, 6)
+
+-- Nút tắt GUI
+local closeBtn = Instance.new("TextButton")
+closeBtn.Name = "CloseBtn"
+closeBtn.Size = UDim2.new(0, 32, 0, 32)
+closeBtn.Position = UDim2.new(1, -38, 0.5, -16)
+closeBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+closeBtn.Text = "✕"
+closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+closeBtn.TextSize = 14
+closeBtn.Font = Enum.Font.GothamBold
+closeBtn.Parent = topBar
+Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 6)
+
+-- Nội dung bên trong GUI
+local content = Instance.new("ScrollingFrame")
+content.Size = UDim2.new(1, -20, 1, -55)
+content.Position = UDim2.new(0, 10, 0, 48)
+content.BackgroundTransparency = 1
+content.CanvasSize = UDim2.new(0, 0, 0, 500)
+content.ScrollBarThickness = 4
+content.Parent = mainFrame
+
+local function createLabel(text, yPos)
+    local lbl = Instance.new("TextLabel")
+    lbl.Size = UDim2.new(1, 0, 0, 20)
+    lbl.Position = UDim2.new(0, 0, 0, yPos)
+    lbl.BackgroundTransparency = 1
+    lbl.Text = text
+    lbl.TextColor3 = Color3.fromRGB(180, 180, 190)
+    lbl.Font = Enum.Font.GothamSemibold
+    lbl.TextSize = 12
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+    lbl.Parent = content
+    return lbl
+end
+
+local function createTextBox(placeholder, yPos)
+    local tb = Instance.new("TextBox")
+    tb.Size = UDim2.new(1, 0, 0, 34)
+    tb.Position = UDim2.new(0, 0, 0, yPos)
+    tb.BackgroundColor3 = Color3.fromRGB(35, 35, 42)
+    tb.TextColor3 = Color3.fromRGB(255, 255, 255)
+    tb.PlaceholderText = placeholder
+    tb.PlaceholderColor3 = Color3.fromRGB(120, 120, 130)
+    tb.Text = ""
+    tb.Font = Enum.Font.Gotham
+    tb.TextSize = 13
+    tb.Parent = content
+    Instance.new("UICorner", tb).CornerRadius = UDim.new(0, 8)
+    return tb
+end
+
+local function createButton(text, color, yPos, height)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1, 0, 0, height or 35)
+    btn.Position = UDim2.new(0, 0, 0, yPos)
+    btn.BackgroundColor3 = color
+    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    btn.Text = text
+    btn.Font = Enum.Font.GothamBold
+    btn.TextSize = 13
+    btn.Parent = content
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 8)
+    return btn
+end
+
+createLabel("ID ÂM THANH (ROBLOX AUDIO ID)", 5)
+local idBox = createTextBox("Nhập ID nhạc...", 28)
+
+createLabel("PHÁT / DỪNG HẲN", 70)
+local playBtn = createButton("PHÁT NHẠC", Color3.fromRGB(46, 204, 113), 93, 36)
+local stopBtn = createButton("DỪNG HẲN", Color3.fromRGB(231, 76, 60), 134, 36)
+
+createLabel("TỐC ĐỘ PHÁT (SPEED: VD 1, 1.5, 0.8)", 178)
+local speedBox = createTextBox("1", 201)
+
+createLabel("ÂM LƯỢNG (VOLUME: 0 ĐẾN 10)", 245)
+local volumeBox = createTextBox("2", 268)
+
+createLabel("ĐỘ BASS / BEAT ĐẬM NHẠT (0 ĐẾN 10)", 312)
+local bassBox = createTextBox("0", 335)
+
+createLabel("ĐIỀU KHIỂN KHÁC", 377)
+local pauseResumeBtn = createButton("TẠM DỪNG / TIẾP TỤC", Color3.fromRGB(52, 152, 219), 400, 36)
+
+-- Hệ thống kéo thả GUI chính & Khóa vị trí
+local isLocked = false
+lockBtn.MouseButton1Click:Connect(function()
+    isLocked = not isLocked
+    lockBtn.Text = isLocked and "🔒" or "🔓"
+    lockBtn.BackgroundColor3 = isLocked and Color3.fromRGB(192, 57, 43) or Color3.fromRGB(45, 45, 55)
+end)
+
+local function makeDraggable(frame, handle)
+    local dragging, dragInput, dragStart, startPos
+    handle.InputBegan:Connect(function(input)
+        if isLocked and frame == mainFrame then return end
+
+        
