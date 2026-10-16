@@ -1,0 +1,389 @@
+--// BOOMBOX (item 212641536) - Delta X
+local Players = game:GetService("Players")
+local UIS = game:GetService("UserInputService")
+local SoundService = game:GetService("SoundService")
+local CoreGui = game:GetService("CoreGui")
+local player = Players.LocalPlayer
+
+local env = (getgenv and getgenv()) or _G
+if env.__BoomboxCleanup then pcall(env.__BoomboxCleanup) end
+
+local connections, alive = {}, true
+local function track(c) table.insert(connections, c) return c end
+
+----------------------------------------------------------------
+-- ÂM THANH (nằm trong SoundService nên không bị ngắt khi chết)
+----------------------------------------------------------------
+local sound = Instance.new("Sound")
+sound.Name = "BoomboxSound"
+sound.Looped = true
+sound.Volume = 1
+sound.Parent = SoundService
+
+local eq = Instance.new("EqualizerSoundEffect")
+eq.LowGain, eq.MidGain, eq.HighGain = 0, 0, 0
+eq.Parent = sound
+
+local paused = false
+
+----------------------------------------------------------------
+-- LẤY ITEM BOOMBOX
+----------------------------------------------------------------
+local template
+do
+	local ok, objs = pcall(function() return game:GetObjects("rbxassetid://212641536") end)
+	if ok and objs then
+		for _, o in ipairs(objs) do
+			if o:IsA("Tool") then template = o break end
+			local t = o:FindFirstChildWhichIsA("Tool", true)
+			if t then template = t break end
+		end
+	end
+	if not template then
+		template = Instance.new("Tool")
+		template.Name = "Boombox"
+		local h = Instance.new("Part")
+		h.Name = "Handle"
+		h.Size = Vector3.new(1.5, 1, 0.6)
+		h.Parent = template
+	end
+	for _, d in ipairs(template:GetDescendants()) do
+		if d:IsA("Script") or d:IsA("LocalScript") or d:IsA("Sound") then d:Destroy() end
+	end
+	template.CanBeDropped = false
+	template.RequiresHandle = true
+end
+
+----------------------------------------------------------------
+-- GUI
+----------------------------------------------------------------
+local function new(class, props, parent)
+	local o = Instance.new(class)
+	for k, v in pairs(props) do o[k] = v end
+	o.Parent = parent
+	return o
+end
+local function round(o, r) new("UICorner", {CornerRadius = UDim.new(0, r)}, o) end
+
+local function getGuiParent()
+	if gethui then
+		local ok, h = pcall(gethui)
+		if ok and h then return h end
+	end
+	local ok = pcall(function() return CoreGui.Name end)
+	if ok then return CoreGui end
+	return player:WaitForChild("PlayerGui")
+end
+
+local gui = new("ScreenGui", {Name = "BoomboxUI", ResetOnSpawn = false, ZIndexBehavior = Enum.ZIndexBehavior.Sibling}, nil)
+pcall(function() if syn and syn.protect_gui then syn.protect_gui(gui) end end)
+gui.Parent = getGuiParent()
+
+local BG, PANEL, ACCENT = Color3.fromRGB(28, 28, 36), Color3.fromRGB(44, 44, 56), Color3.fromRGB(90, 120, 255)
+
+-- Nút nổi để mở/đóng
+local openBtn = new("TextButton", {
+	Size = UDim2.fromOffset(44, 44), Position = UDim2.new(0, 10, 0.4, 0),
+	BackgroundColor3 = ACCENT, Text = "🎵", TextSize = 22, Font = Enum.Font.GothamBold,
+	TextColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0,
+}, gui)
+round(openBtn, 22)
+
+-- Khung chính
+local main = new("Frame", {
+	Size = UDim2.fromOffset(280, 310), Position = UDim2.new(0.5, -140, 0.5, -155),
+	BackgroundColor3 = BG, BorderSizePixel = 0, Active = true,
+}, gui)
+round(main, 10)
+
+local top = new("Frame", {Size = UDim2.new(1, 0, 0, 34), BackgroundColor3 = PANEL, BorderSizePixel = 0, Active = true}, main)
+round(top, 10)
+
+local lockBtn = new("TextButton", {
+	Size = UDim2.fromOffset(30, 26), Position = UDim2.fromOffset(4, 4),
+	BackgroundColor3 = BG, Text = "🔓", TextSize = 16, Font = Enum.Font.GothamBold,
+	TextColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0,
+}, top)
+round(lockBtn, 6)
+
+new("TextLabel", {
+	Size = UDim2.new(1, -80, 1, 0), Position = UDim2.fromOffset(40, 0),
+	BackgroundTransparency = 1, Text = "🔊 Boombox", TextSize = 16,
+	Font = Enum.Font.GothamBold, TextColor3 = Color3.new(1, 1, 1),
+}, top)
+
+local closeBtn = new("TextButton", {
+	Size = UDim2.fromOffset(30, 26), Position = UDim2.new(1, -34, 0, 4),
+	BackgroundColor3 = Color3.fromRGB(200, 60, 60), Text = "✕", TextSize = 14,
+	Font = Enum.Font.GothamBold, TextColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0,
+}, top)
+round(closeBtn, 6)
+
+local function label(text, y)
+	return new("TextLabel", {
+		Size = UDim2.new(1, -20, 0, 18), Position = UDim2.fromOffset(10, y),
+		BackgroundTransparency = 1, Text = text, TextSize = 13, Font = Enum.Font.Gotham,
+		TextColor3 = Color3.fromRGB(200, 200, 215), TextXAlignment = Enum.TextXAlignment.Left,
+	}, main)
+end
+local function box(placeholder, y, text)
+	local b = new("TextBox", {
+		Size = UDim2.fromOffset(175, 30), Position = UDim2.fromOffset(10, y),
+		BackgroundColor3 = PANEL, PlaceholderText = placeholder, Text = text or "",
+		TextSize = 14, Font = Enum.Font.Gotham, TextColor3 = Color3.new(1, 1, 1),
+		PlaceholderColor3 = Color3.fromRGB(130, 130, 145), ClearTextOnFocus = false, BorderSizePixel = 0,
+	}, main)
+	round(b, 6)
+	return b
+end
+local function button(text, x, y, w, h, color)
+	local b = new("TextButton", {
+		Size = UDim2.fromOffset(w, h), Position = UDim2.fromOffset(x, y),
+		BackgroundColor3 = color or ACCENT, Text = text, TextSize = 14, Font = Enum.Font.GothamBold,
+		TextColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0,
+	}, main)
+	round(b, 6)
+	return b
+end
+
+label("ID âm thanh", 42)
+local idBox = box("Nhập ID nhạc...", 60)
+local playBtn = button("▶ Phát", 195, 60, 75, 30)
+
+label("Tốc độ (0.1 – 10)", 100)
+local speedBox = box("1", 118, "1")
+local applyBtn = button("Áp dụng", 195, 118, 75, 30)
+
+local bassLabel = label("Bass / Beat: +0.0 dB", 158)
+
+-- Slider bass
+local BASS_MIN, BASS_MAX = -20, 10
+local sliderHit = new("Frame", {Size = UDim2.fromOffset(260, 28), Position = UDim2.fromOffset(10, 178), BackgroundTransparency = 1, Active = true}, main)
+local track_ = new("Frame", {Size = UDim2.new(1, 0, 0, 6), Position = UDim2.new(0, 0, 0.5, -3), BackgroundColor3 = PANEL, BorderSizePixel = 0}, sliderHit)
+round(track_, 3)
+local fill = new("Frame", {Size = UDim2.new(0.667, 0, 1, 0), BackgroundColor3 = ACCENT, BorderSizePixel = 0}, track_)
+round(fill, 3)
+local knob = new("Frame", {Size = UDim2.fromOffset(18, 18), AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.667, 0, 0.5, 0), BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0}, sliderHit)
+round(knob, 9)
+
+local function setBass(v)
+	v = math.clamp(v, BASS_MIN, BASS_MAX)
+	eq.LowGain = v
+	local rel = (v - BASS_MIN) / (BASS_MAX - BASS_MIN)
+	fill.Size = UDim2.new(rel, 0, 1, 0)
+	knob.Position = UDim2.new(rel, 0, 0.5, 0)
+	bassLabel.Text = string.format("Bass / Beat: %+.1f dB", v)
+end
+
+local sliding = false
+local function sliderUpdate(x)
+	local rel = math.clamp((x - track_.AbsolutePosition.X) / track_.AbsoluteSize.X, 0, 1)
+	setBass(BASS_MIN + (BASS_MAX - BASS_MIN) * rel)
+end
+track(sliderHit.InputBegan:Connect(function(i)
+	if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+		sliding = true
+		sliderUpdate(i.Position.X)
+	end
+end))
+track(UIS.InputChanged:Connect(function(i)
+	if sliding and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then
+		sliderUpdate(i.Position.X)
+	end
+end))
+track(UIS.InputEnded:Connect(function(i)
+	if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+		sliding = false
+	end
+end))
+
+local pauseBtn = button("⏸ Tạm dừng", 10, 222, 260, 36)
+
+new("TextLabel", {
+	Size = UDim2.new(1, -20, 0, 36), Position = UDim2.fromOffset(10, 266),
+	BackgroundTransparency = 1, TextWrapped = true, TextSize = 11, Font = Enum.Font.Gotham,
+	TextColor3 = Color3.fromRGB(140, 140, 155),
+	Text = "Bấm vào boombox đang cầm trên tay để mở/đóng menu.",
+}, main)
+
+-- Kéo GUI + khoá
+local locked = false
+do
+	local dragging, dragStart, startPos
+	track(top.InputBegan:Connect(function(i)
+		if locked then return end
+		if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+			dragging, dragStart, startPos = true, i.Position, main.Position
+		end
+	end))
+	track(UIS.InputChanged:Connect(function(i)
+		if dragging and not locked and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then
+			local d = i.Position - dragStart
+			main.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X, startPos.Y.Scale, startPos.Y.Offset + d.Y)
+		end
+	end))
+	track(UIS.InputEnded:Connect(function(i)
+		if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+			dragging = false
+		end
+	end))
+end
+
+track(lockBtn.Activated:Connect(function()
+	locked = not locked
+	lockBtn.Text = locked and "🔒" or "🔓"
+	lockBtn.BackgroundColor3 = locked and ACCENT or BG
+end))
+
+local function toggleGui() main.Visible = not main.Visible end
+track(openBtn.Activated:Connect(toggleGui))
+track(closeBtn.Activated:Connect(function() main.Visible = false end))
+
+----------------------------------------------------------------
+-- CHỨC NĂNG
+----------------------------------------------------------------
+track(playBtn.Activated:Connect(function()
+	local id = (idBox.Text:gsub("%D", ""))
+	if id == "" then return end
+	sound.SoundId = "rbxassetid://" .. id
+	sound.TimePosition = 0
+	sound:Play()
+	paused = false
+	pauseBtn.Text = "⏸ Tạm dừng"
+end))
+
+local function applySpeed()
+	local n = tonumber(speedBox.Text)
+	if n then
+		n = math.clamp(n, 0.1, 10)
+		sound.PlaybackSpeed = n
+	end
+	speedBox.Text = tostring(sound.PlaybackSpeed)
+end
+track(applyBtn.Activated:Connect(applySpeed))
+track(speedBox.FocusLost:Connect(applySpeed))
+
+track(pauseBtn.Activated:Connect(function()
+	if sound.SoundId == "" then return end
+	if paused then
+		sound:Resume()
+		pauseBtn.Text = "⏸ Tạm dừng"
+	else
+		sound:Pause()
+		pauseBtn.Text = "▶ Tiếp tục"
+	end
+	paused = not paused
+end))
+
+setBass(0)
+
+----------------------------------------------------------------
+-- TOOL + BOOMBOX TREO LƯNG
+----------------------------------------------------------------
+local currentTool, backProp, saved = nil, nil, {}
+
+local function setBackVisible(v)
+	if not backProp then return end
+	local list = backProp:GetDescendants()
+	table.insert(list, backProp)
+	for _, d in ipairs(list) do
+		if d:IsA("BasePart") or d:IsA("Decal") or d:IsA("Texture") then
+			if saved[d] == nil then saved[d] = d.Transparency end
+			d.Transparency = v and saved[d] or 1
+		end
+	end
+end
+
+local function buildBackProp(char)
+	if backProp then pcall(function() backProp:Destroy() end) end
+	backProp, saved = nil, {}
+	local torso = char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso") or char:FindFirstChild("HumanoidRootPart")
+	local handle = template:FindFirstChild("Handle")
+	if not (torso and handle) then return end
+
+	local p = handle:Clone()
+	for _, d in ipairs(p:GetDescendants()) do
+		if d:IsA("Script") or d:IsA("LocalScript") or d:IsA("Sound") or d:IsA("TouchTransmitter") or d:IsA("JointInstance") or d:IsA("WeldConstraint") then
+			d:Destroy()
+		end
+	end
+	p.Name = "BoomboxBack"
+	p.Anchored = false
+	p.CanCollide = false
+	p.CanTouch = false
+	p.CanQuery = false
+	p.Massless = true
+	p.Parent = char
+
+	local w = Instance.new("Weld")
+	w.Part0 = torso
+	w.Part1 = p
+	w.C0 = CFrame.new(0, 0, 0.5 + p.Size.Z / 2 + 0.05) * CFrame.Angles(0, math.pi, 0)
+	w.Parent = p
+
+	backProp = p
+	setBackVisible(not (currentTool and currentTool.Parent == char))
+end
+
+local function giveTool()
+	local backpack = player:WaitForChild("Backpack", 10)
+	if not backpack then return end
+	if currentTool then pcall(function() currentTool:Destroy() end) end
+	local t = template:Clone()
+	t.Parent = backpack
+	currentTool = t
+	t.Equipped:Connect(function() setBackVisible(false) end)
+	t.Unequipped:Connect(function() setBackVisible(true) end)
+	t.Activated:Connect(toggleGui)
+end
+
+local busy = false
+local function setup(char)
+	if busy then return end
+	busy = true
+	pcall(function()
+		char:WaitForChild("Humanoid")
+		char:WaitForChild("HumanoidRootPart")
+		task.wait(0.3)
+		giveTool()
+		buildBackProp(char)
+	end)
+	busy = false
+end
+
+track(player.CharacterAdded:Connect(setup))
+if player.Character then task.spawn(setup, player.Character) end
+
+-- Vòng kiểm tra: nếu game xoá item/prop thì tự thêm lại
+task.spawn(function()
+	while alive do
+		task.wait(1)
+		local char = player.Character
+		local hum = char and char:FindFirstChildOfClass("Humanoid")
+		if hum and hum.Health > 0 and not busy then
+			local bp = player:FindFirstChild("Backpack")
+			if bp and (not currentTool or (currentTool.Parent ~= bp and currentTool.Parent ~= char)) then
+				busy = true
+				pcall(giveTool)
+				busy = false
+			end
+			if not backProp or not backProp.Parent then
+				busy = true
+				pcall(buildBackProp, char)
+				busy = false
+			end
+		end
+	end
+end)
+
+----------------------------------------------------------------
+-- DỌN DẸP KHI CHẠY LẠI SCRIPT
+----------------------------------------------------------------
+env.__BoomboxCleanup = function()
+	alive = false
+	for _, c in ipairs(connections) do pcall(function() c:Disconnect() end) end
+	pcall(function() gui:Destroy() end)
+	pcall(function() sound:Destroy() end)
+	pcall(function() if currentTool then currentTool:Destroy() end end)
+	pcall(function() if backProp then backProp:Destroy() end end)
+end
