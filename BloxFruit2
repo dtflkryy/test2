@@ -1,0 +1,574 @@
+--// ⚡ XTREME HUB - Blox Fruits (Delta X) - bản có báo lỗi
+local Players = game:GetService("Players")
+local RS = game:GetService("ReplicatedStorage")
+local UIS = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
+local VirtualUser = game:GetService("VirtualUser")
+local CollectionService = game:GetService("CollectionService")
+local TeleportService = game:GetService("TeleportService")
+local CoreGui = game:GetService("CoreGui")
+local player = Players.LocalPlayer
+
+-- Nếu thấy thông báo "GUI đã gắn vào" mà vẫn không thấy GUI, đổi false -> true
+local FORCE_PLAYERGUI = false
+
+local function notify(t)
+	pcall(function()
+		game:GetService("StarterGui"):SetCore("SendNotification", {
+			Title = "XTREME", Text = tostring(t):sub(1, 250), Duration = 15,
+		})
+	end)
+end
+
+if not game:IsLoaded() then game.Loaded:Wait() end
+notify("Script đã chạy, đang tải GUI...")
+
+local ok_, err_ = pcall(function()
+
+local env = (getgenv and getgenv()) or _G
+if env.__XtremeCleanup then pcall(env.__XtremeCleanup) end
+
+local SEAS = {[2753915549] = 1, [4442272183] = 2, [7449423635] = 3}
+local sea = SEAS[game.PlaceId] or 0
+if sea == 0 then notify("Có vẻ đây không phải Blox Fruits, một số chức năng có thể không chạy.") end
+
+local connections, alive = {}, true
+local function track(c) table.insert(connections, c) return c end
+
+----------------------------------------------------------------
+-- TRẠNG THÁI
+----------------------------------------------------------------
+local S = {
+	autoLevel = false, autoMob = false, bring = false,
+	autoStat = false, noclip = false, chest = false, fruit = false,
+	mob = nil, weaponType = "Melee", stat = "Melee", statPoints = 1, speed = 16,
+}
+
+-- Bảng quest Sea 1: {level tối thiểu, tên quest, số thứ tự, tên quái}
+local QUESTS = {
+	{1, "BanditQuest1", 1, "Bandit"}, {10, "JungleQuest", 1, "Monkey"}, {15, "JungleQuest", 2, "Gorilla"},
+	{30, "BuggyQuest1", 1, "Pirate"}, {40, "BuggyQuest1", 2, "Brute"},
+	{60, "DesertQuest", 1, "Desert Bandit"}, {75, "DesertQuest", 2, "Desert Officer"},
+	{90, "SnowQuest", 1, "Snow Bandit"}, {100, "SnowQuest", 2, "Snowman"},
+	{120, "MarineQuest2", 1, "Chief Petty Officer"},
+	{150, "SkyQuest", 1, "Sky Bandit"}, {175, "SkyQuest", 2, "Dark Master"},
+	{190, "PrisonerQuest", 1, "Prisoner"}, {210, "PrisonerQuest", 2, "Dangerous Prisoner"},
+	{250, "ColosseumQuest", 1, "Toga Warrior"}, {275, "ColosseumQuest", 2, "Gladiator"},
+	{300, "MagmaQuest", 1, "Military Soldier"}, {325, "MagmaQuest", 2, "Military Spy"},
+	{375, "FishmanQuest", 1, "Fishman Warrior"}, {400, "FishmanQuest", 2, "Fishman Commando"},
+	{450, "SkyExp1Quest", 1, "God's Guard"}, {475, "SkyExp1Quest", 2, "Shanda"},
+	{525, "SkyExp2Quest", 1, "Royal Squad"}, {550, "SkyExp2Quest", 2, "Royal Soldier"},
+	{625, "FountainQuest", 1, "Galley Pirate"}, {650, "FountainQuest", 2, "Galley Captain"},
+}
+
+----------------------------------------------------------------
+-- HÀM TIỆN ÍCH
+----------------------------------------------------------------
+local statusLbl
+local function status(t) if statusLbl then statusLbl.Text = "Trạng thái: " .. t end end
+
+local function root()
+	local c = player.Character
+	return c and c:FindFirstChild("HumanoidRootPart")
+end
+local function isAlive()
+	local c = player.Character
+	local h = c and c:FindFirstChildOfClass("Humanoid")
+	return h and h.Health > 0
+end
+
+local activeTween
+local function tweenTo(cf)
+	local r = root()
+	if not r then return end
+	local dist = (r.Position - cf.Position).Magnitude
+	if dist < 60 then r.CFrame = cf return end
+	if activeTween then activeTween:Cancel() end
+	activeTween = TweenService:Create(r, TweenInfo.new(dist / 250, Enum.EasingStyle.Linear), {CFrame = cf})
+	activeTween:Play()
+	activeTween.Completed:Wait()
+end
+
+local function holdOn(on)
+	local r = root()
+	if not r then return end
+	local bv = r:FindFirstChild("XtremeHold")
+	if on and not bv then
+		bv = Instance.new("BodyVelocity")
+		bv.Name = "XtremeHold"
+		bv.MaxForce = Vector3.new(1e9, 1e9, 1e9)
+		bv.Velocity = Vector3.zero
+		bv.Parent = r
+	elseif not on and bv then
+		bv:Destroy()
+	end
+end
+
+local function equipWeapon()
+	local char = player.Character
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	if not hum then return end
+	for _, t in ipairs(char:GetChildren()) do
+		if t:IsA("Tool") and t.ToolTip == S.weaponType then return end
+	end
+	for _, t in ipairs(player.Backpack:GetChildren()) do
+		if t:IsA("Tool") and t.ToolTip == S.weaponType then hum:EquipTool(t) return end
+	end
+end
+
+local function click()
+	pcall(function()
+		VirtualUser:CaptureController()
+		VirtualUser:ClickButton1(Vector2.new(1280, 672))
+	end)
+end
+
+local function getEnemies(name)
+	local out = {}
+	local folder = workspace:FindFirstChild("Enemies")
+	if folder then
+		for _, e in ipairs(folder:GetChildren()) do
+			local h = e:FindFirstChildOfClass("Humanoid")
+			local r = e:FindFirstChild("HumanoidRootPart")
+			if h and r and h.Health > 0 and (not name or e.Name == name) then table.insert(out, e) end
+		end
+	end
+	return out
+end
+
+local function nearestEnemy(name)
+	local r = root()
+	if not r then return end
+	local best, bd
+	for _, e in ipairs(getEnemies(name)) do
+		local d = (e.HumanoidRootPart.Position - r.Position).Magnitude
+		if not bd or d < bd then best, bd = e, d end
+	end
+	return best
+end
+
+local function findSpawn(name)
+	local r = root()
+	local wo = workspace:FindFirstChild("_WorldOrigin")
+	local folder = wo and wo:FindFirstChild("EnemySpawns")
+	if not (folder and r) then return end
+	local best, bd
+	for _, s in ipairs(folder:GetChildren()) do
+		if s:IsA("BasePart") and string.find(s.Name, name, 1, true) then
+			local d = (s.Position - r.Position).Magnitude
+			if not bd or d < bd then best, bd = s, d end
+		end
+	end
+	return best
+end
+
+local function bringMobs(name, cf)
+	for _, e in ipairs(getEnemies(name)) do
+		local r = e.HumanoidRootPart
+		if (r.Position - cf.Position).Magnitude < 350 then
+			r.CFrame = cf
+			r.CanCollide = false
+			e.Humanoid.WalkSpeed = 0
+		end
+	end
+end
+
+local function questForLevel()
+	local ok, lv = pcall(function() return player.Data.Level.Value end)
+	if not ok then return end
+	local pick
+	for _, q in ipairs(QUESTS) do if lv >= q[1] then pick = q end end
+	return pick
+end
+
+local function questActive()
+	local main = player.PlayerGui:FindFirstChild("Main")
+	local q = main and main:FindFirstChild("Quest")
+	return q and q.Visible
+end
+
+local function startQuest(q)
+	pcall(function() RS.Remotes.CommF_:InvokeServer("StartQuest", q[2], q[3]) end)
+end
+
+----------------------------------------------------------------
+-- GUI
+----------------------------------------------------------------
+local function new(class, props, parent)
+	local o = Instance.new(class)
+	for k, v in pairs(props) do o[k] = v end
+	o.Parent = parent
+	return o
+end
+local function round(o, r) new("UICorner", {CornerRadius = UDim.new(0, r)}, o) end
+local function ord(page) return #page:GetChildren() end
+
+local gui = new("ScreenGui", {
+	Name = "XtremeHub", ResetOnSpawn = false, ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+	DisplayOrder = 9999, IgnoreGuiInset = true,
+}, nil)
+pcall(function() if syn and syn.protect_gui then syn.protect_gui(gui) end end)
+
+local targets = {
+	function() return gethui and gethui() end,
+	function() return CoreGui end,
+	function() return player:WaitForChild("PlayerGui", 10) end,
+}
+if FORCE_PLAYERGUI then table.insert(targets, 1, table.remove(targets, 3)) end
+for _, getParent in ipairs(targets) do
+	local ok, parent = pcall(getParent)
+	if ok and parent then
+		pcall(function() gui.Parent = parent end)
+		if gui.Parent == parent then break end
+	end
+end
+notify("GUI đã gắn vào: " .. (gui.Parent and gui.Parent.Name or "không gắn được"))
+
+local BG, PANEL = Color3.fromRGB(18, 18, 22), Color3.fromRGB(34, 34, 42)
+local ACCENT, OFFC = Color3.fromRGB(230, 50, 60), Color3.fromRGB(70, 70, 82)
+local WHITE = Color3.new(1, 1, 1)
+
+local function draggable(handle, target, onTap)
+	local dragging, moved, ds, sp = false, false, nil, nil
+	track(handle.InputBegan:Connect(function(i)
+		if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+			dragging, moved, ds, sp = true, false, i.Position, target.Position
+		end
+	end))
+	track(UIS.InputChanged:Connect(function(i)
+		if dragging and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then
+			local d = i.Position - ds
+			if d.Magnitude > 6 then moved = true end
+			if moved then
+				target.Position = UDim2.new(sp.X.Scale, sp.X.Offset + d.X, sp.Y.Scale, sp.Y.Offset + d.Y)
+			end
+		end
+	end))
+	track(UIS.InputEnded:Connect(function(i)
+		if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+			if dragging and not moved and onTap then onTap() end
+			dragging = false
+		end
+	end))
+end
+
+-- Nút nổi
+local floatBtn = new("TextButton", {
+	Size = UDim2.fromOffset(44, 44), Position = UDim2.new(0, 10, 0.35, 0), BackgroundColor3 = ACCENT,
+	Text = "⚡", TextSize = 22, Font = Enum.Font.GothamBold, TextColor3 = WHITE, BorderSizePixel = 0, AutoButtonColor = false,
+}, gui)
+round(floatBtn, 22)
+
+-- Khung chính
+local main = new("Frame", {
+	Size = UDim2.fromOffset(300, 380), Position = UDim2.new(0.5, -150, 0.5, -190),
+	BackgroundColor3 = BG, BorderSizePixel = 0, Active = true,
+}, gui)
+round(main, 10)
+new("UIStroke", {Color = ACCENT, Thickness = 1.5}, main)
+
+local top = new("Frame", {Size = UDim2.new(1, 0, 0, 34), BackgroundColor3 = PANEL, BorderSizePixel = 0, Active = true}, main)
+round(top, 10)
+new("TextLabel", {
+	Size = UDim2.new(1, -50, 1, 0), Position = UDim2.fromOffset(10, 0), BackgroundTransparency = 1,
+	Text = "⚡ XTREME HUB • Blox Fruits", TextSize = 15, Font = Enum.Font.GothamBlack,
+	TextColor3 = WHITE, TextXAlignment = Enum.TextXAlignment.Left,
+}, top)
+local closeBtn = new("TextButton", {
+	Size = UDim2.fromOffset(30, 26), Position = UDim2.new(1, -34, 0, 4), BackgroundColor3 = ACCENT,
+	Text = "✕", TextSize = 14, Font = Enum.Font.GothamBold, TextColor3 = WHITE, BorderSizePixel = 0,
+}, top)
+round(closeBtn, 6)
+
+draggable(top, main)
+draggable(floatBtn, floatBtn, function() main.Visible = not main.Visible end)
+track(closeBtn.Activated:Connect(function() main.Visible = false end))
+
+statusLbl = new("TextLabel", {
+	Size = UDim2.new(1, -16, 0, 26), Position = UDim2.new(0, 8, 1, -32), BackgroundColor3 = PANEL,
+	Text = "Trạng thái: chờ lệnh", TextSize = 12, Font = Enum.Font.Gotham, TextColor3 = Color3.fromRGB(200, 200, 215), BorderSizePixel = 0,
+}, main)
+round(statusLbl, 6)
+
+-- Tabs
+local pages, tabBtns = {}, {}
+local function makePage(name)
+	local p = new("ScrollingFrame", {
+		Size = UDim2.new(1, -16, 0, 266), Position = UDim2.fromOffset(8, 76), BackgroundTransparency = 1,
+		ScrollBarThickness = 3, AutomaticCanvasSize = Enum.AutomaticSize.Y, CanvasSize = UDim2.new(),
+		BorderSizePixel = 0, Visible = false,
+	}, main)
+	new("UIListLayout", {Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder}, p)
+	pages[name] = p
+	return p
+end
+local function showTab(name)
+	for n, p in pairs(pages) do p.Visible = (n == name) end
+	for n, b in pairs(tabBtns) do b.BackgroundColor3 = (n == name) and ACCENT or PANEL end
+end
+local tabNames = {"Farm", "Stats", "Misc"}
+for idx, name in ipairs(tabNames) do
+	local b = new("TextButton", {
+		Size = UDim2.new(1 / 3, -6, 0, 28), Position = UDim2.new((idx - 1) / 3, 8 + (idx - 1) * 2, 0, 40),
+		BackgroundColor3 = PANEL, Text = name, TextSize = 13, Font = Enum.Font.GothamBold, TextColor3 = WHITE, BorderSizePixel = 0,
+	}, main)
+	round(b, 6)
+	tabBtns[name] = b
+	track(b.Activated:Connect(function() showTab(name) end))
+end
+local farmPage, statPage, miscPage = makePage("Farm"), makePage("Stats"), makePage("Misc")
+
+-- Thành phần
+local renders = {}
+local function toggle(page, text, key, onChange)
+	local b = new("TextButton", {
+		Size = UDim2.new(1, -4, 0, 34), BackgroundColor3 = PANEL, Text = "", BorderSizePixel = 0, LayoutOrder = ord(page),
+	}, page)
+	round(b, 6)
+	new("TextLabel", {
+		Size = UDim2.new(1, -60, 1, 0), Position = UDim2.fromOffset(10, 0), BackgroundTransparency = 1, Text = text,
+		TextSize = 13, Font = Enum.Font.GothamBold, TextColor3 = WHITE, TextXAlignment = Enum.TextXAlignment.Left,
+	}, b)
+	local ind = new("TextLabel", {
+		Size = UDim2.fromOffset(44, 22), Position = UDim2.new(1, -52, 0.5, -11), BackgroundColor3 = OFFC,
+		Text = "OFF", TextSize = 11, Font = Enum.Font.GothamBold, TextColor3 = WHITE, BorderSizePixel = 0,
+	}, b)
+	round(ind, 11)
+	local function render()
+		ind.Text = S[key] and "ON" or "OFF"
+		ind.BackgroundColor3 = S[key] and ACCENT or OFFC
+	end
+	renders[key] = render
+	track(b.Activated:Connect(function()
+		S[key] = not S[key]
+		if onChange then onChange(S[key]) end
+		for _, r in pairs(renders) do r() end
+	end))
+	render()
+end
+
+local function button(page, text, cb)
+	local b = new("TextButton", {
+		Size = UDim2.new(1, -4, 0, 34), BackgroundColor3 = PANEL, Text = text, TextSize = 13,
+		Font = Enum.Font.GothamBold, TextColor3 = WHITE, BorderSizePixel = 0, LayoutOrder = ord(page),
+	}, page)
+	round(b, 6)
+	track(b.Activated:Connect(function() cb(b) end))
+	return b
+end
+
+local function cycle(page, text, options, key)
+	local i = table.find(options, S[key]) or 1
+	button(page, text .. ": " .. S[key], function(b)
+		i = i % #options + 1
+		S[key] = options[i]
+		b.Text = text .. ": " .. S[key]
+	end)
+end
+
+local function inputRow(page, text, default, onSet)
+	local f = new("Frame", {Size = UDim2.new(1, -4, 0, 34), BackgroundColor3 = PANEL, BorderSizePixel = 0, LayoutOrder = ord(page)}, page)
+	round(f, 6)
+	new("TextLabel", {
+		Size = UDim2.new(1, -90, 1, 0), Position = UDim2.fromOffset(10, 0), BackgroundTransparency = 1, Text = text,
+		TextSize = 13, Font = Enum.Font.GothamBold, TextColor3 = WHITE, TextXAlignment = Enum.TextXAlignment.Left,
+	}, f)
+	local tb = new("TextBox", {
+		Size = UDim2.fromOffset(70, 24), Position = UDim2.new(1, -78, 0.5, -12), BackgroundColor3 = BG,
+		Text = tostring(default), TextSize = 13, Font = Enum.Font.Gotham, TextColor3 = WHITE,
+		ClearTextOnFocus = true, BorderSizePixel = 0,
+	}, f)
+	round(tb, 6)
+	track(tb.FocusLost:Connect(function() tb.Text = tostring(onSet(tonumber(tb.Text))) end))
+end
+
+----------------------------------------------------------------
+-- TAB FARM
+----------------------------------------------------------------
+toggle(farmPage, "Auto Level (Sea 1)", "autoLevel", function(on) if on then S.autoMob = false end end)
+toggle(farmPage, "Auto Farm quái đã chọn", "autoMob", function(on) if on then S.autoLevel = false end end)
+toggle(farmPage, "Gom quái (Bring Mobs)", "bring")
+cycle(farmPage, "Vũ khí", {"Melee", "Sword", "Blox Fruit", "Gun"}, "weaponType")
+
+local mobBtn
+local mobList = new("ScrollingFrame", {
+	Size = UDim2.new(1, -4, 0, 110), BackgroundColor3 = PANEL, BorderSizePixel = 0, ScrollBarThickness = 3,
+	AutomaticCanvasSize = Enum.AutomaticSize.Y, CanvasSize = UDim2.new(), Visible = false, LayoutOrder = 99,
+}, farmPage)
+round(mobList, 6)
+new("UIListLayout", {Padding = UDim.new(0, 4)}, mobList)
+
+local function refreshMobs()
+	for _, c in ipairs(mobList:GetChildren()) do if c:IsA("TextButton") then c:Destroy() end end
+	local seen = {}
+	local folder = workspace:FindFirstChild("Enemies")
+	if not folder then return end
+	for _, e in ipairs(folder:GetChildren()) do
+		if not seen[e.Name] then
+			seen[e.Name] = true
+			local b = new("TextButton", {
+				Size = UDim2.new(1, -6, 0, 26), BackgroundColor3 = BG, Text = e.Name, TextSize = 12,
+				Font = Enum.Font.Gotham, TextColor3 = WHITE, BorderSizePixel = 0,
+			}, mobList)
+			round(b, 5)
+			track(b.Activated:Connect(function()
+				S.mob = e.Name
+				mobBtn.Text = "Quái: " .. e.Name
+				mobList.Visible = false
+			end))
+		end
+	end
+end
+mobBtn = button(farmPage, "Quái: (bấm để chọn, đứng gần quái)", function()
+	mobList.Visible = not mobList.Visible
+	if mobList.Visible then refreshMobs() end
+end)
+
+----------------------------------------------------------------
+-- TAB STATS
+----------------------------------------------------------------
+toggle(statPage, "Auto cộng điểm", "autoStat")
+cycle(statPage, "Chỉ số", {"Melee", "Defense", "Sword", "Gun", "Demon Fruit"}, "stat")
+inputRow(statPage, "Điểm mỗi lần", S.statPoints, function(n)
+	if n then S.statPoints = math.clamp(math.floor(n), 1, 100) end
+	return S.statPoints
+end)
+
+----------------------------------------------------------------
+-- TAB MISC
+----------------------------------------------------------------
+toggle(miscPage, "Noclip", "noclip")
+toggle(miscPage, "Auto nhặt rương", "chest")
+toggle(miscPage, "Auto nhặt trái ác quỷ rơi", "fruit")
+inputRow(miscPage, "WalkSpeed", S.speed, function(n)
+	if n then S.speed = math.clamp(n, 16, 200) end
+	return S.speed
+end)
+button(miscPage, "Vào lại server (Rejoin)", function()
+	TeleportService:Teleport(game.PlaceId, player)
+end)
+
+showTab("Farm")
+
+----------------------------------------------------------------
+-- VÒNG LẶP CHÍNH
+----------------------------------------------------------------
+local function farming() return S.autoLevel or S.autoMob end
+
+-- Auto farm
+task.spawn(function()
+	local wasFarming = false
+	while alive do
+		task.wait(0.1)
+		local f = farming()
+		if f and isAlive() then
+			wasFarming = true
+			holdOn(true)
+			pcall(function()
+				local mobName
+				if S.autoLevel and sea == 1 then
+					local q = questForLevel()
+					if q then
+						mobName = q[4]
+						if not questActive() then
+							status("Nhận quest " .. q[2])
+							startQuest(q)
+							task.wait(0.6)
+						end
+					end
+				else
+					mobName = S.mob
+					if S.autoLevel then status("Auto Level chỉ hỗ trợ Sea 1, hãy chọn quái thủ công") end
+				end
+				if not mobName then
+					status("Chưa có quái để farm")
+					return
+				end
+				equipWeapon()
+				local e = nearestEnemy(mobName)
+				if not e then
+					local sp = findSpawn(mobName)
+					if sp then
+						status("Đi tới chỗ " .. mobName)
+						tweenTo(sp.CFrame * CFrame.new(0, 15, 0))
+					else
+						status("Không thấy " .. mobName)
+					end
+					task.wait(0.5)
+					return
+				end
+				status("Đang đánh " .. mobName)
+				local er = e:FindFirstChild("HumanoidRootPart")
+				if er then tweenTo(er.CFrame * CFrame.new(0, 12, 0)) end
+				local hum = e:FindFirstChildOfClass("Humanoid")
+				while alive and farming() and isAlive() and hum and hum.Health > 0 and e.Parent do
+					local r, er2 = root(), e:FindFirstChild("HumanoidRootPart")
+					if not (r and er2) then break end
+					if S.bring then bringMobs(mobName, er2.CFrame) end
+					r.CFrame = er2.CFrame * CFrame.new(0, 12, 0) * CFrame.Angles(math.rad(-90), 0, 0)
+					equipWeapon()
+					click()
+					task.wait(0.1)
+				end
+			end)
+		elseif wasFarming then
+			wasFarming = false
+			holdOn(false)
+			if activeTween then activeTween:Cancel() end
+			status("chờ lệnh")
+		end
+	end
+end)
+
+-- Auto stat
+task.spawn(function()
+	while alive do
+		task.wait(1)
+		if S.autoStat then
+			pcall(function()
+				local pts = player.Data.Points.Value
+				if pts > 0 then
+					RS.Remotes.CommF_:InvokeServer("AddPoint", S.stat, math.min(pts, S.statPoints))
+				end
+			end)
+		end
+	end
+end)
+
+-- Nhặt rương
+task.spawn(function()
+	while alive do
+		task.wait(0.5)
+		if S.chest and not farming() and isAlive() then
+			pcall(function()
+				holdOn(true)
+				for _, c in ipairs(CollectionService:GetTagged("_ChestTagged")) do
+					if not (alive and S.chest) or farming() then break end
+					if c.Parent then
+						status("Nhặt rương...")
+						tweenTo(c:IsA("BasePart") and c.CFrame or c:GetPivot())
+						task.wait(0.4)
+					end
+				end
+				if not farming() then holdOn(false) end
+			end)
+		end
+	end
+end)
+
+-- Nhặt trái ác quỷ
+task.spawn(function()
+	while alive do
+		task.wait(1)
+		if S.fruit and not farming() and isAlive() then
+			pcall(function()
+				for _, v in ipairs(workspace:GetChildren()) do
+					if not (alive and S.fruit) or farming() then break end
+					if string.find(v.Name, "Fruit") then
+						local h = v:FindFirstChild("Handle")
+						if h then
+							status("Nhặt " .. v.Name)
+							holdOn(true)
+							tweenTo(h.CFrame)
+							tas
