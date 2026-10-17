@@ -1,0 +1,457 @@
+--[[ XAIM | Aimbot + ESP | Delta X (điện thoại)
+  - Nút tròn "X": đóng/mở menu (kéo để di chuyển)
+  - Nút "AIM": bật/tắt ngắm nhanh (kéo để di chuyển)
+  - Nút khoá góc trên-trái: khoá di chuyển menu + 2 nút nhỏ
+]]
+local env = (getgenv and getgenv()) or _G
+if env.XAIM_CLEAN then pcall(env.XAIM_CLEAN) end
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UIS = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local lp = Players.LocalPlayer
+
+------------------------------------------------ settings
+local S = {
+	Aim = false, ShowFOV = true, FOV = 120, Smooth = 35, AimMax = 800,
+	TeamCheck = true, WallCheck = true, Part = "Head",
+	ESP = false, ESPBox = true, ESPName = true, ESPDist = true, ESPMax = 1500, ESPColor = 1,
+	Glass = 0.35,
+}
+local ESP_COLORS = {
+	{c = Color3.fromRGB(255, 70, 70)}, {c = Color3.fromRGB(80, 255, 120)},
+	{c = Color3.fromRGB(80, 160, 255)}, {c = Color3.fromRGB(255, 230, 70)},
+	{c = Color3.fromRGB(190, 100, 255)}, {c = Color3.new(1, 1, 1)}, {rainbow = true},
+}
+local THEMES = {
+	{bg = Color3.fromRGB(25, 55, 120), ac = Color3.fromRGB(90, 165, 255)},
+	{bg = Color3.fromRGB(70, 35, 130), ac = Color3.fromRGB(180, 120, 255)},
+	{bg = Color3.fromRGB(130, 40, 85), ac = Color3.fromRGB(255, 120, 190)},
+	{bg = Color3.fromRGB(25, 95, 60), ac = Color3.fromRGB(90, 230, 150)},
+	{bg = Color3.fromRGB(130, 70, 25), ac = Color3.fromRGB(255, 170, 80)},
+	{bg = Color3.fromRGB(120, 30, 35), ac = Color3.fromRGB(255, 90, 100)},
+	{bg = Color3.fromRGB(20, 95, 105), ac = Color3.fromRGB(80, 225, 235)},
+	{bg = Color3.fromRGB(15, 15, 20), ac = Color3.fromRGB(200, 200, 215)},
+	{bg = Color3.fromRGB(70, 72, 85), ac = Color3.fromRGB(180, 190, 220)},
+	{rainbow = true},
+}
+local T = {bg = THEMES[1].bg, ac = THEMES[1].ac}
+local rainbowTheme = false
+local alive, locked = true, false
+local conns, themed, refreshers = {}, {}, {}
+local BIND = "XAIM_" .. tostring(math.random(1000, 9999))
+
+local function bind(sig, fn) local c = sig:Connect(fn); conns[#conns + 1] = c; return c end
+local function reg(fn) themed[#themed + 1] = fn; fn() end
+local function applyAll() for _, f in ipairs(themed) do f() end end
+local function new(class, props, parent)
+	local o = Instance.new(class)
+	for k, v in pairs(props) do o[k] = v end
+	if parent then o.Parent = parent end
+	return o
+end
+local function corner(o, r) return new("UICorner", {CornerRadius = typeof(r) == "UDim" and r or UDim.new(0, r or 8)}, o) end
+
+------------------------------------------------ gui root
+local gui = new("ScreenGui", {Name = "XAIM", ResetOnSpawn = false, IgnoreGuiInset = true,
+	ZIndexBehavior = Enum.ZIndexBehavior.Sibling, DisplayOrder = 999})
+do
+	local ok = pcall(function() gui.Parent = (gethui and gethui()) or game:GetService("CoreGui") end)
+	if not ok or not gui.Parent then gui.Parent = lp:WaitForChild("PlayerGui") end
+end
+
+local function glass(class, props, parent, radius)
+	local f = new(class, props, parent)
+	f.BorderSizePixel = 0
+	corner(f, radius or 14)
+	new("UIStroke", {Color = Color3.new(1, 1, 1), Transparency = 0.55, Thickness = 1.2,
+		ApplyStrokeMode = Enum.ApplyStrokeMode.Border}, f)
+	new("UIGradient", {Color = ColorSequence.new(Color3.new(1, 1, 1), Color3.fromRGB(170, 170, 190)), Rotation = 90}, f)
+	local hi = new("Frame", {BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0,
+		Size = UDim2.new(1, 0, 0.5, 0)}, f)
+	corner(hi, radius or 14)
+	new("UIGradient", {Transparency = NumberSequence.new(0.78, 1), Rotation = 90}, hi)
+	reg(function() f.BackgroundColor3 = T.bg; f.BackgroundTransparency = S.Glass end)
+	return f
+end
+
+local function iconLabel(parent, text, size)
+	return new("TextLabel", {BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), Text = text,
+		TextColor3 = Color3.new(1, 1, 1), Font = Enum.Font.GothamBold, TextSize = size or 18}, parent)
+end
+
+------------------------------------------------ drag helper
+local function makeDraggable(obj, handle, onTap)
+	local drag
+	bind(handle.InputBegan, function(i)
+		if i.UserInputType == Enum.UserInputType.Touch or i.UserInputType == Enum.UserInputType.MouseButton1 then
+			drag = {input = i, start = i.Position, pos = obj.Position, moved = false}
+		end
+	end)
+	bind(UIS.InputChanged, function(i)
+		if drag and (i == drag.input or i.UserInputType == Enum.UserInputType.MouseMovement) then
+			local d = i.Position - drag.start
+			if d.Magnitude > 8 then drag.moved = true end
+			if drag.moved and not locked then
+				obj.Position = UDim2.new(drag.pos.X.Scale, drag.pos.X.Offset + d.X, drag.pos.Y.Scale, drag.pos.Y.Offset + d.Y)
+			end
+		end
+	end)
+	bind(UIS.InputEnded, function(i)
+		if drag and (i == drag.input or i.UserInputType == drag.input.UserInputType) then
+			local t = drag; drag = nil
+			if not t.moved and onTap then onTap() end
+		end
+	end)
+end
+
+------------------------------------------------ overlay: fov circle, esp folder
+local fov = new("Frame", {AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5),
+	BackgroundTransparency = 1, Size = UDim2.fromOffset(240, 240), Active = false}, gui)
+corner(fov, UDim.new(1, 0))
+local fovStroke = new("UIStroke", {Thickness = 1.5, Transparency = 0.25}, fov)
+reg(function() fovStroke.Color = T.ac end)
+local espFolder = new("Folder", {Name = "esp"}, gui)
+
+------------------------------------------------ floating buttons
+local orb = glass("TextButton", {Size = UDim2.fromOffset(46, 46), Position = UDim2.fromOffset(14, 120),
+	Text = "", AutoButtonColor = false, ZIndex = 20}, gui, UDim.new(1, 0))
+iconLabel(orb, "X", 20)
+
+local aimBtn = glass("TextButton", {Size = UDim2.fromOffset(46, 46), Position = UDim2.fromOffset(14, 176),
+	Text = "", AutoButtonColor = false, ZIndex = 20}, gui, UDim.new(1, 0))
+local aimLbl = iconLabel(aimBtn, "AIM", 12)
+local function paintAimBtn()
+	aimLbl.TextColor3 = S.Aim and Color3.fromRGB(110, 255, 150) or Color3.new(1, 1, 1)
+end
+reg(paintAimBtn)
+
+local lockBtn = glass("TextButton", {Size = UDim2.fromOffset(38, 38), Position = UDim2.fromOffset(8, 60),
+	Text = "", AutoButtonColor = false, ZIndex = 30}, gui, UDim.new(1, 0))
+local lockLbl = iconLabel(lockBtn, "🔓", 18)
+bind(lockBtn.Activated, function()
+	locked = not locked
+	lockLbl.Text = locked and "🔒" or "🔓"
+end)
+
+------------------------------------------------ menu
+local root = glass("CanvasGroup", {Name = "Menu", AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5),
+	Size = UDim2.fromOffset(276, 252), GroupTransparency = 1, Visible = false, ZIndex = 10}, gui, 16)
+local scale = new("UIScale", {Scale = 0.92}, root)
+
+local menuOpen = false
+local function setMenu(v)
+	menuOpen = v
+	if v then
+		root.Visible = true
+		TweenService:Create(root, TweenInfo.new(0.22, Enum.EasingStyle.Quint), {GroupTransparency = 0}):Play()
+		TweenService:Create(scale, TweenInfo.new(0.22, Enum.EasingStyle.Quint), {Scale = 1}):Play()
+	else
+		TweenService:Create(root, TweenInfo.new(0.18), {GroupTransparency = 1}):Play()
+		TweenService:Create(scale, TweenInfo.new(0.18), {Scale = 0.92}):Play()
+		task.delay(0.2, function() if not menuOpen then root.Visible = false end end)
+	end
+end
+
+local titleBar = new("Frame", {BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 34)}, root)
+new("TextLabel", {BackgroundTransparency = 1, Position = UDim2.fromOffset(14, 0), Size = UDim2.new(1, -60, 1, 0),
+	Text = "XAIM  •  Aimbot + ESP", TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = Color3.new(1, 1, 1),
+	Font = Enum.Font.GothamBold, TextSize = 14}, titleBar)
+local closeBtn = new("TextButton", {AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -8, 0.5, 0),
+	Size = UDim2.fromOffset(26, 26), BackgroundColor3 = Color3.new(1, 1, 1), BackgroundTransparency = 0.85,
+	Text = "X", TextColor3 = Color3.new(1, 1, 1), Font = Enum.Font.GothamBold, TextSize = 13, AutoButtonColor = false}, titleBar)
+corner(closeBtn, UDim.new(1, 0))
+bind(closeBtn.Activated, function() setMenu(false) end)
+
+makeDraggable(root, titleBar)
+makeDraggable(orb, orb, function() setMenu(not menuOpen) end)
+makeDraggable(aimBtn, aimBtn, function()
+	S.Aim = not S.Aim
+	if refreshers.Aim then refreshers.Aim() end
+	paintAimBtn()
+end)
+
+-- tabs & pages
+local tabBar = new("Frame", {BackgroundTransparency = 1, Position = UDim2.fromOffset(8, 36), Size = UDim2.new(1, -16, 0, 28)}, root)
+new("UIListLayout", {FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 4)}, tabBar)
+local tabBtns, pages, curTab = {}, {}, 1
+local function paintTabs()
+	for i, b in ipairs(tabBtns) do
+		b.BackgroundColor3 = (i == curTab) and T.ac or Color3.new(1, 1, 1)
+		b.BackgroundTransparency = (i == curTab) and 0.25 or 0.88
+	end
+end
+reg(paintTabs)
+local function selectTab(i)
+	curTab = i
+	for k, p in ipairs(pages) do p.Visible = (k == i) end
+	paintTabs()
+end
+local function addTab(name)
+	local b = new("TextButton", {Size = UDim2.new(1 / 3, -3, 1, 0), Text = name, TextColor3 = Color3.new(1, 1, 1),
+		Font = Enum.Font.GothamBold, TextSize = 12, AutoButtonColor = false, BorderSizePixel = 0}, tabBar)
+	corner(b, 8)
+	tabBtns[#tabBtns + 1] = b
+	local page = new("ScrollingFrame", {BackgroundTransparency = 1, BorderSizePixel = 0, Position = UDim2.fromOffset(6, 70),
+		Size = UDim2.new(1, -12, 1, -76), CanvasSize = UDim2.new(), AutomaticCanvasSize = Enum.AutomaticSize.Y,
+		ScrollBarThickness = 3, ScrollingDirection = Enum.ScrollingDirection.Y, Visible = false}, root)
+	new("UIListLayout", {Padding = UDim.new(0, 6)}, page)
+	new("UIPadding", {PaddingRight = UDim.new(0, 5)}, page)
+	pages[#pages + 1] = page
+	local idx = #pages
+	bind(b.Activated, function() selectTab(idx) end)
+	return page
+end
+local aimPage, espPage, uiPage = addTab("Aim"), addTab("ESP"), addTab("Giao diện")
+
+-- row widgets
+local function rowFrame(page, h)
+	local r = new("Frame", {Size = UDim2.new(1, 0, 0, h), BackgroundColor3 = Color3.new(1, 1, 1),
+		BackgroundTransparency = 0.9, BorderSizePixel = 0}, page)
+	corner(r, 8)
+	return r
+end
+local function label(parent, text, props)
+	local l = new("TextLabel", {BackgroundTransparency = 1, Position = UDim2.fromOffset(10, 0), Size = UDim2.new(1, -64, 1, 0),
+		Text = text, TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = Color3.new(1, 1, 1),
+		Font = Enum.Font.Gotham, TextSize = 13}, parent)
+	if props then for k, v in pairs(props) do l[k] = v end end
+	return l
+end
+
+local function toggle(page, text, key, cb)
+	local row = rowFrame(page, 32)
+	label(row, text)
+	local sw = new("TextButton", {Text = "", AutoButtonColor = false, Size = UDim2.fromOffset(42, 22),
+		AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -8, 0.5, 0), BorderSizePixel = 0}, row)
+	corner(sw, UDim.new(1, 0))
+	local knob = new("Frame", {Size = UDim2.fromOffset(16, 16), AnchorPoint = Vector2.new(0, 0.5),
+		BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0}, sw)
+	corner(knob, UDim.new(1, 0))
+	local function paint() sw.BackgroundColor3 = S[key] and T.ac or Color3.fromRGB(90, 90, 100) end
+	local function move(anim)
+		local p = S[key] and UDim2.new(1, -19, 0.5, 0) or UDim2.new(0, 3, 0.5, 0)
+		if anim then TweenService:Create(knob, TweenInfo.new(0.15), {Position = p}):Play() else knob.Position = p end
+	end
+	reg(paint); move(false)
+	refreshers[key] = function() move(true); paint() end
+	bind(sw.Activated, function()
+		S[key] = not S[key]
+		refreshers[key]()
+		if cb then cb(S[key]) end
+	end)
+end
+
+local activeSlider
+local function slider(page, text, key, mn, mx, cb)
+	local row = rowFrame(page, 48)
+	label(row, text, {Position = UDim2.fromOffset(10, 4), Size = UDim2.new(1, -70, 0, 18)})
+	local val = label(row, "", {Position = UDim2.new(1, -62, 0, 4), Size = UDim2.fromOffset(52, 18), TextXAlignment = Enum.TextXAlignment.Right})
+	local hit = new("TextButton", {Text = "", BackgroundTransparency = 1, Position = UDim2.new(0, 10, 0, 24),
+		Size = UDim2.new(1, -20, 0, 20), AutoButtonColor = false}, row)
+	local track = new("Frame", {Position = UDim2.new(0, 0, 0.5, -3), Size = UDim2.new(1, 0, 0, 6),
+		BackgroundColor3 = Color3.new(1, 1, 1), BackgroundTransparency = 0.7, BorderSizePixel = 0}, hit)
+	corner(track, UDim.new(1, 0))
+	local fill = new("Frame", {Size = UDim2.new(0, 0, 1, 0), BorderSizePixel = 0}, track)
+	corner(fill, UDim.new(1, 0))
+	local knob = new("Frame", {AnchorPoint = Vector2.new(0.5, 0.5), Size = UDim2.fromOffset(14, 14),
+		BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0}, track)
+	corner(knob, UDim.new(1, 0))
+	reg(function() fill.BackgroundColor3 = T.ac end)
+	local function redraw()
+		local r = (S[key] - mn) / (mx - mn)
+		fill.Size = UDim2.new(r, 0, 1, 0)
+		knob.Position = UDim2.new(r, 0, 0.5, 0)
+		val.Text = tostring(math.floor(S[key] * 100 + 0.5) / 100)
+	end
+	local function upd(x)
+		local r = math.clamp((x - hit.AbsolutePosition.X) / math.max(hit.AbsoluteSize.X, 1), 0, 1)
+		local v = mn + (mx - mn) * r
+		S[key] = (mx - mn) <= 2 and math.floor(v * 100 + 0.5) / 100 or math.floor(v + 0.5)
+		redraw()
+		if cb then cb(S[key]) end
+	end
+	redraw()
+	bind(hit.InputBegan, function(i)
+		if i.UserInputType == Enum.UserInputType.Touch or i.UserInputType == Enum.UserInputType.MouseButton1 then
+			activeSlider = {input = i, upd = upd, page = page}
+			page.ScrollingEnabled = false
+			upd(i.Position.X)
+		end
+	end)
+end
+
+local function cycle(page, text, key, options, names)
+	local row = rowFrame(page, 32)
+	label(row, text)
+	local b = new("TextButton", {AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -8, 0.5, 0),
+		Size = UDim2.fromOffset(64, 22), Text = "", TextColor3 = Color3.new(1, 1, 1), Font = Enum.Font.GothamBold,
+		TextSize = 12, AutoButtonColor = false, BorderSizePixel = 0}, row)
+	corner(b, 8)
+	reg(function() b.BackgroundColor3 = T.ac end)
+	local function show() b.Text = names[S[key]] or tostring(S[key]) end
+	show()
+	bind(b.Activated, function()
+		for i, o in ipairs(options) do
+			if o == S[key] then S[key] = options[i % #options + 1]; break end
+		end
+		show()
+	end)
+end
+
+local function swatches(page, title, items, getSel, onPick)
+	local rows = math.ceil(#items / 7)
+	local row = rowFrame(page, 26 + rows * 30)
+	label(row, title, {Position = UDim2.fromOffset(10, 3), Size = UDim2.new(1, -20, 0, 18)})
+	local grid = new("Frame", {BackgroundTransparency = 1, Position = UDim2.fromOffset(10, 24), Size = UDim2.new(1, -20, 0, rows * 30)}, row)
+	new("UIGridLayout", {CellSize = UDim2.fromOffset(26, 26), CellPadding = UDim2.fromOffset(6, 4)}, grid)
+	local strokes = {}
+	local function mark()
+		for i, s in ipairs(strokes) do s.Transparency = (i == getSel()) and 0 or 1 end
+	end
+	for i, it in ipairs(items) do
+		local b = new("TextButton", {Text = it.rainbow and "RGB" or "", TextSize = 9, Font = Enum.Font.GothamBold,
+			TextColor3 = Color3.new(1, 1, 1), AutoButtonColor = false, BorderSizePixel = 0,
+			BackgroundColor3 = it.rainbow and Color3.new(1, 1, 1) or (it.c or it.ac)}, grid)
+		corner(b, UDim.new(1, 0))
+		if it.rainbow then
+			new("UIGradient", {Color = ColorSequence.new({
+				ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 70, 70)), ColorSequenceKeypoint.new(0.33, Color3.fromRGB(255, 230, 70)),
+				ColorSequenceKeypoint.new(0.66, Color3.fromRGB(70, 200, 255)), ColorSequenceKeypoint.new(1, Color3.fromRGB(190, 90, 255))})}, b)
+		end
+		strokes[i] = new("UIStroke", {Color = Color3.new(1, 1, 1), Thickness = 2, Transparency = 1}, b)
+		bind(b.Activated, function() onPick(i); mark() end)
+	end
+	mark()
+end
+
+-- aim page
+toggle(aimPage, "Bật aimbot", "Aim", function() paintAimBtn() end)
+toggle(aimPage, "Hiện vòng FOV", "ShowFOV")
+slider(aimPage, "Bán kính FOV", "FOV", 30, 400)
+slider(aimPage, "Độ mượt", "Smooth", 0, 100)
+slider(aimPage, "Tầm ngắm tối đa", "AimMax", 50, 2000)
+toggle(aimPage, "Team check", "TeamCheck")
+toggle(aimPage, "Wall check", "WallCheck")
+cycle(aimPage, "Bộ phận ngắm", "Part", {"Head", "Torso"}, {Head = "Đầu", Torso = "Thân"})
+-- esp page
+toggle(espPage, "Bật ESP", "ESP")
+toggle(espPage, "Viền nhân vật", "ESPBox")
+toggle(espPage, "Hiện tên", "ESPName")
+toggle(espPage, "Hiện khoảng cách", "ESPDist")
+slider(espPage, "Khoảng cách ESP tối đa", "ESPMax", 100, 3000)
+swatches(espPage, "Màu ESP", ESP_COLORS, function() return S.ESPColor end, function(i) S.ESPColor = i end)
+-- ui page
+local themeIdx = 1
+swatches(uiPage, "Màu nền menu", THEMES, function() return themeIdx end, function(i)
+	themeIdx = i
+	local t = THEMES[i]
+	rainbowTheme = t.rainbow == true
+	if not rainbowTheme then T.bg, T.ac = t.bg, t.ac; applyAll() end
+end)
+slider(uiPage, "Độ trong của kính", "Glass", 0.1, 0.8, function() applyAll() end)
+do
+	local row = rowFrame(uiPage, 32)
+	local b = new("TextButton", {Size = UDim2.new(1, -16, 0, 24), Position = UDim2.fromOffset(8, 4), Text = "Huỷ script",
+		BackgroundColor3 = Color3.fromRGB(200, 60, 70), TextColor3 = Color3.new(1, 1, 1), Font = Enum.Font.GothamBold,
+		TextSize = 12, AutoButtonColor = false, BorderSizePixel = 0}, row)
+	corner(b, 8)
+	bind(b.Activated, function() if env.XAIM_CLEAN then env.XAIM_CLEAN() end end)
+end
+selectTab(1)
+
+------------------------------------------------ slider input tracking
+bind(UIS.InputChanged, function(i)
+	if activeSlider and (i == activeSlider.input or i.UserInputType == Enum.UserInputType.MouseMovement) then
+		activeSlider.upd(i.Position.X)
+	end
+end)
+bind(UIS.InputEnded, function(i)
+	if activeSlider and (i == activeSlider.input or i.UserInputType == activeSlider.input.UserInputType) then
+		activeSlider.page.ScrollingEnabled = true
+		activeSlider = nil
+	end
+end)
+
+------------------------------------------------ aimbot logic
+local rp = RaycastParams.new()
+rp.FilterType = Enum.RaycastFilterType.Exclude
+
+local function sameTeam(plr)
+	if plr.Team and lp.Team then return plr.Team == lp.Team end
+	return false
+end
+local function getPart(char)
+	if S.Part == "Head" then return char:FindFirstChild("Head") end
+	return char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso") or char:FindFirstChild("HumanoidRootPart")
+end
+local function visible(c, part, char)
+	local ign = {lp.Character, char}
+	local origin = c.CFrame.Position
+	for _ = 1, 4 do
+		rp.FilterDescendantsInstances = ign
+		local r = workspace:Raycast(origin, part.Position - origin, rp)
+		if not r then return true end
+		local inst = r.Instance
+		if inst.Transparency >= 0.95 or not inst.CanCollide then ign[#ign + 1] = inst else return false end
+	end
+	return false
+end
+local function getTarget(c)
+	local best, bestD = nil, S.FOV
+	local center = c.ViewportSize / 2
+	for _, plr in ipairs(Players:GetPlayers()) do
+		if plr ~= lp and not (S.TeamCheck and sameTeam(plr)) then
+			local char = plr.Character
+			local hum = char and char:FindFirstChildOfClass("Humanoid")
+			local part = hum and hum.Health > 0 and getPart(char)
+			if part then
+				local pos, on = c:WorldToViewportPoint(part.Position)
+				if on then
+					local d = (Vector2.new(pos.X, pos.Y) - center).Magnitude
+					if d < bestD and (part.Position - c.CFrame.Position).Magnitude <= S.AimMax
+						and (not S.WallCheck or visible(c, part, char)) then
+						best, bestD = part, d
+					end
+				end
+			end
+		end
+	end
+	return best
+end
+
+RunService:BindToRenderStep(BIND, Enum.RenderPriority.Camera.Value + 1, function()
+	local c = workspace.CurrentCamera
+	if not c then return end
+	fov.Size = UDim2.fromOffset(S.FOV * 2, S.FOV * 2)
+	fov.Visible = S.ShowFOV
+	if not S.Aim then return end
+	local part = getTarget(c)
+	if part then
+		local alpha = math.clamp(1 - S.Smooth / 100 * 0.96, 0.04, 1)
+		c.CFrame = c.CFrame:Lerp(CFrame.lookAt(c.CFrame.Position, part.Position), alpha)
+	end
+end)
+
+-- rainbow theme
+bind(RunService.RenderStepped, function()
+	if rainbowTheme then
+		local h = (os.clock() * 0.2) % 1
+		T.bg, T.ac = Color3.fromHSV(h, 0.65, 0.45), Color3.fromHSV(h, 0.6, 1)
+		applyAll()
+	end
+end)
+
+------------------------------------------------ esp
+local esp = {}
+local function espColor()
+	local it = ESP_COLORS[S.ESPColor]
+	if it.rainbow then return Color3.fromHSV((os.clock() * 0.3) % 1, 0.8, 1) end
+	return it.c
+end
+local function getESP(plr)
+	local e = esp[plr]
+	if e then return e end
+	local hl = new("Highlight", {FillTransparency = 1, OutlineTransparency = 0,
+		DepthMode = Enum.HighlightDe
