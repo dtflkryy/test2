@@ -1,0 +1,235 @@
+-- XTREME Mini Farm v1 | Blox Fruits | chạy bằng Delta X
+-- Tính năng: Auto Farm quái gần nhất, Auto Click, Auto Haki, Anti-AFK, GUI kéo được
+
+local Players = game:GetService("Players")
+local RS = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local VirtualUser = game:GetService("VirtualUser")
+local UIS = game:GetService("UserInputService")
+
+local lp = Players.LocalPlayer
+if not game:IsLoaded() then game.Loaded:Wait() end
+
+if getgenv then
+	if getgenv().XTREME_LOADED then
+		warn("XTREME đã chạy rồi, bỏ qua.")
+		return
+	end
+	getgenv().XTREME_LOADED = true
+end
+
+local cfg = {
+	Farm = false,
+	Click = false,
+	Haki = false,
+	Height = 12,   -- độ cao lơ lửng trên đầu quái
+	Range = 3000,  -- tầm tìm quái
+	Speed = 250,   -- tốc độ bay (studs/giây)
+}
+
+---------------------------------------------------------------- helpers
+local function getHRP()
+	local c = lp.Character
+	return c and c:FindFirstChild("HumanoidRootPart")
+end
+
+local function nearestEnemy()
+	local root = getHRP()
+	local folder = workspace:FindFirstChild("Enemies")
+	if not root or not folder then return end
+	local best, bestDist = nil, cfg.Range
+	for _, m in ipairs(folder:GetChildren()) do
+		local hum = m:FindFirstChildOfClass("Humanoid")
+		local part = m:FindFirstChild("HumanoidRootPart")
+		if hum and part and hum.Health > 0 then
+			local d = (part.Position - root.Position).Magnitude
+			if d < bestDist then
+				best, bestDist = m, d
+			end
+		end
+	end
+	return best
+end
+
+local function equipMelee()
+	local c = lp.Character
+	if not c or c:FindFirstChildOfClass("Tool") then return end
+	local hum = c:FindFirstChildOfClass("Humanoid")
+	if not hum then return end
+	for _, t in ipairs(lp.Backpack:GetChildren()) do
+		if t:IsA("Tool") and t.ToolTip == "Melee" then
+			hum:EquipTool(t)
+			return
+		end
+	end
+end
+
+local currentTween
+local function flyTo(cf)
+	local root = getHRP()
+	if not root then return end
+	local dist = (root.Position - cf.Position).Magnitude
+	if dist < 15 then
+		root.CFrame = cf
+		return
+	end
+	if currentTween then currentTween:Cancel() end
+	currentTween = TweenService:Create(root, TweenInfo.new(dist / cfg.Speed, Enum.EasingStyle.Linear), {CFrame = cf})
+	currentTween:Play()
+end
+
+-- giữ nhân vật không rơi khi đang farm
+local function setHover(on)
+	local root = getHRP()
+	if not root then return end
+	local bv = root:FindFirstChild("XT_BV")
+	if on and not bv then
+		bv = Instance.new("BodyVelocity")
+		bv.Name = "XT_BV"
+		bv.Velocity = Vector3.zero
+		bv.MaxForce = Vector3.new(1e9, 1e9, 1e9)
+		bv.Parent = root
+	elseif not on and bv then
+		bv:Destroy()
+	end
+end
+
+---------------------------------------------------------------- vòng lặp
+-- Auto Farm
+task.spawn(function()
+	while task.wait(0.15) do
+		if cfg.Farm then
+			pcall(function()
+				equipMelee()
+				setHover(true)
+				local mob = nearestEnemy()
+				if mob then
+					local part = mob.HumanoidRootPart
+					local target = CFrame.lookAt(part.Position + Vector3.new(0, cfg.Height, 0), part.Position)
+					flyTo(target)
+				end
+			end)
+		else
+			pcall(setHover, false)
+		end
+	end
+end)
+
+-- Auto Click
+task.spawn(function()
+	while task.wait(0.1) do
+		if cfg.Click then
+			pcall(function()
+				VirtualUser:CaptureController()
+				VirtualUser:Button1Down(Vector2.new(900, 500))
+				task.wait(0.03)
+				VirtualUser:Button1Up(Vector2.new(900, 500))
+			end)
+		end
+	end
+end)
+
+-- Auto Haki
+task.spawn(function()
+	while task.wait(2) do
+		if cfg.Haki then
+			pcall(function()
+				local c = lp.Character
+				if c and not c:FindFirstChild("HasBuso") then
+					RS.Remotes.CommanderF:InvokeServer("Buso")
+				end
+			end)
+		end
+	end
+end)
+
+-- Anti-AFK
+lp.Idled:Connect(function()
+	pcall(function()
+		VirtualUser:CaptureController()
+		VirtualUser:ClickButton2(Vector2.new())
+	end)
+end)
+
+---------------------------------------------------------------- GUI
+local parent = (gethui and gethui()) or game:GetService("CoreGui")
+local old = parent:FindFirstChild("XTREME_GUI")
+if old then old:Destroy() end
+
+local gui = Instance.new("ScreenGui")
+gui.Name = "XTREME_GUI"
+gui.ResetOnSpawn = false
+gui.Parent = parent
+
+local main = Instance.new("Frame")
+main.Size = UDim2.fromOffset(190, 190)
+main.Position = UDim2.new(0, 20, 0.3, 0)
+main.BackgroundColor3 = Color3.fromRGB(25, 25, 32)
+main.BorderSizePixel = 0
+main.Active = true
+main.Parent = gui
+Instance.new("UICorner", main).CornerRadius = UDim.new(0, 10)
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, 0, 0, 30)
+title.BackgroundTransparency = 1
+title.Text = "XTREME Mini Farm"
+title.TextColor3 = Color3.fromRGB(255, 120, 60)
+title.Font = Enum.Font.GothamBold
+title.TextSize = 15
+title.Parent = main
+
+local function makeToggle(text, y, key)
+	local b = Instance.new("TextButton")
+	b.Size = UDim2.new(1, -20, 0, 34)
+	b.Position = UDim2.new(0, 10, 0, y)
+	b.BackgroundColor3 = Color3.fromRGB(60, 60, 70)
+	b.TextColor3 = Color3.new(1, 1, 1)
+	b.Font = Enum.Font.Gotham
+	b.TextSize = 14
+	b.AutoButtonColor = true
+	b.Parent = main
+	Instance.new("UICorner", b).CornerRadius = UDim.new(0, 8)
+
+	local function refresh()
+		b.Text = text .. ": " .. (cfg[key] and "BẬT" or "TẮT")
+		b.BackgroundColor3 = cfg[key] and Color3.fromRGB(40, 150, 80) or Color3.fromRGB(60, 60, 70)
+	end
+	b.MouseButton1Click:Connect(function()
+		cfg[key] = not cfg[key]
+		refresh()
+	end)
+	refresh()
+end
+
+makeToggle("Auto Farm", 38, "Farm")
+makeToggle("Auto Click", 80, "Click")
+makeToggle("Auto Haki", 122, "Haki")
+
+local hint = Instance.new("TextLabel")
+hint.Size = UDim2.new(1, 0, 0, 22)
+hint.Position = UDim2.new(0, 0, 1, -24)
+hint.BackgroundTransparency = 1
+hint.Text = "Kéo tiêu đề để di chuyển"
+hint.TextColor3 = Color3.fromRGB(150, 150, 160)
+hint.Font = Enum.Font.Gotham
+hint.TextSize = 11
+hint.Parent = main
+
+-- kéo GUI (chuột + cảm ứng)
+local dragging, dragStart, startPos
+title.InputBegan:Connect(function(i)
+	if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+		dragging, dragStart, startPos = true, i.Position, main.Position
+		i.Changed:Connect(function()
+			if i.UserInputState == Enum.UserInputState.End then dragging = false end
+		end)
+	end
+end)
+UIS.InputChanged:Connect(function(i)
+	if dragging and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then
+		local d = i.Position - dragStart
+		main.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X, startPos.Y.Scale, startPos.Y.Offset + d.Y)
+	end
+end)
