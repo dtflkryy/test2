@@ -1,0 +1,470 @@
+--[[
+    HITBOX HUB  |  Luau / Roblox  |  Dành cho Delta Executor (mobile + PC)
+    - Hitbox: kích thước, độ trong suốt, bộ phận, chất liệu, màu, cầu vồng, team check...
+    - Nút nhỏ (kéo được) để đóng/mở GUI  |  RightShift cũng đóng/mở
+    - Nút khoá 🔓/🔒 góc trên bên trái GUI: khoá di chuyển GUI + nút nhỏ
+    - Bảng màu: Dark, Ocean, Sunset, Mint, Valentine (tim bay), Lucky (cỏ 4 lá bay), Rainbow (RGB)
+]]
+
+local Players      = game:GetService("Players")
+local RunService   = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local UIS          = game:GetService("UserInputService")
+local LP           = Players.LocalPlayer
+
+local env = (getgenv and getgenv()) or _G
+if env.HitboxHub then pcall(env.HitboxHub) end -- huỷ bản cũ nếu chạy lại
+
+----------------------------------------------------------------
+-- Tiện ích
+----------------------------------------------------------------
+local conns, alive = {}, true
+local function bind(sig, fn)
+    local c = sig:Connect(fn)
+    table.insert(conns, c)
+    return c
+end
+
+local function tw(o, t, props, style, dir)
+    local tween = TweenService:Create(o, TweenInfo.new(t, style or Enum.EasingStyle.Quad, dir or Enum.EasingDirection.Out), props)
+    tween:Play()
+    return tween
+end
+
+local function new(class, props, parent)
+    local o = Instance.new(class)
+    for k, v in pairs(props) do o[k] = v end
+    o.Parent = parent
+    return o
+end
+
+local function corner(o, r) return new("UICorner", {CornerRadius = UDim.new(0, r)}, o) end
+
+local function getParent()
+    local ok, r = pcall(function() return gethui and gethui() end)
+    if ok and r then return r end
+    ok, r = pcall(function() return game:GetService("CoreGui") end)
+    if ok and r then return r end
+    return LP:WaitForChild("PlayerGui")
+end
+
+----------------------------------------------------------------
+-- Cài đặt hitbox
+----------------------------------------------------------------
+local S = {
+    Enabled     = false,
+    Size        = 15,
+    Transparency= 0.6,
+    Part        = "HumanoidRootPart",
+    Material    = Enum.Material.Neon,
+    Color       = Color3.fromRGB(255, 60, 60),
+    RainbowHB   = false,
+    TeamCheck   = true,
+    IgnoreDead  = true,
+    Dist        = 1000,
+    Particles   = true,
+    Density     = 4,
+}
+
+local orig = setmetatable({}, {__mode = "k"})
+
+local function restore(part)
+    local o = orig[part]
+    if o and part.Parent then
+        pcall(function()
+            part.Size = o.Size
+            part.Transparency = o.Transparency
+            part.Color = o.Color
+            part.Material = o.Material
+            part.CanCollide = o.CanCollide
+        end)
+    end
+    orig[part] = nil
+end
+
+local function restoreAll()
+    for part in pairs(orig) do restore(part) end
+end
+
+local function getPart(char)
+    if S.Part == "Torso" then
+        return char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso")
+    end
+    return char:FindFirstChild(S.Part)
+end
+
+bind(RunService.Heartbeat, function()
+    if not S.Enabled then return end
+    local col = S.RainbowHB and Color3.fromHSV(tick() % 4 / 4, 1, 1) or S.Color
+    local sz = Vector3.new(S.Size, S.Size, S.Size)
+    local myChar = LP.Character
+    local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
+
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LP then
+            local ch = p.Character
+            local part = ch and getPart(ch)
+            if part then
+                local hum = ch:FindFirstChildOfClass("Humanoid")
+                local skip = false
+                if S.TeamCheck and p.Team ~= nil and p.Team == LP.Team then skip = true end
+                if S.IgnoreDead and hum and hum.Health <= 0 then skip = true end
+                if myRoot and (part.Position - myRoot.Position).Magnitude > S.Dist then skip = true end
+
+                if skip then
+                    restore(part)
+                else
+                    if not orig[part] then
+                        orig[part] = {
+                            Size = part.Size, Transparency = part.Transparency,
+                            Color = part.Color, Material = part.Material,
+                            CanCollide = part.CanCollide,
+                        }
+                    end
+                    part.Size = sz
+                    part.Transparency = S.Transparency
+                    part.Color = col
+                    part.Material = S.Material
+                    part.CanCollide = false
+                end
+            end
+        end
+    end
+end)
+
+----------------------------------------------------------------
+-- Bảng màu GUI
+----------------------------------------------------------------
+local Themes = {
+    Dark     = {bg = Color3.fromRGB(22,22,30), bg2 = Color3.fromRGB(36,36,50), accent = Color3.fromRGB(125,105,255), text = Color3.fromRGB(240,240,250)},
+    Ocean    = {bg = Color3.fromRGB(10,28,46), bg2 = Color3.fromRGB(18,48,74), accent = Color3.fromRGB(50,170,255), text = Color3.fromRGB(230,245,255)},
+    Sunset   = {bg = Color3.fromRGB(42,20,28), bg2 = Color3.fromRGB(68,32,40), accent = Color3.fromRGB(255,130,60), text = Color3.fromRGB(255,240,230)},
+    Mint     = {bg = Color3.fromRGB(16,36,34), bg2 = Color3.fromRGB(26,58,54), accent = Color3.fromRGB(60,230,190), text = Color3.fromRGB(230,255,250)},
+    Valentine= {bg = Color3.fromRGB(46,14,30), bg2 = Color3.fromRGB(74,24,48), accent = Color3.fromRGB(255,90,150), text = Color3.fromRGB(255,235,242)},
+    Lucky    = {bg = Color3.fromRGB(10,34,20), bg2 = Color3.fromRGB(18,58,34), accent = Color3.fromRGB(80,225,110), text = Color3.fromRGB(232,255,238)},
+    Rainbow  = {bg = Color3.fromRGB(18,18,24), bg2 = Color3.fromRGB(32,32,42), accent = Color3.fromRGB(255,0,0), text = Color3.fromRGB(255,255,255)},
+}
+local ThemeList = {
+    {"Dark", "Dark"}, {"Ocean", "Ocean"}, {"Sunset", "Sunset"}, {"Mint", "Mint"},
+    {"Valentine", "Valentine ♥"}, {"Lucky", "Lucky 🍀"}, {"Rainbow", "RGB Rainbow"},
+}
+local current = "Dark"
+
+local function C(role) return Themes[current][role] end
+local function resolve(role) return type(role) == "function" and role() or C(role) end
+
+local themed = {}
+local function reg(inst, prop, role)
+    table.insert(themed, {inst, prop, role})
+    inst[prop] = resolve(role)
+    return inst
+end
+
+local function applyTheme(name)
+    current = name
+    for _, t in ipairs(themed) do
+        if t[1].Parent then tw(t[1], 0.35, {[t[2]] = resolve(t[3])}) end
+    end
+end
+
+bind(RunService.RenderStepped, function()
+    if current == "Rainbow" then
+        Themes.Rainbow.accent = Color3.fromHSV(tick() % 6 / 6, 0.75, 1)
+        for _, t in ipairs(themed) do
+            if (t[3] == "accent" or type(t[3]) == "function") and t[1].Parent then
+                t[1][t[2]] = resolve(t[3])
+            end
+        end
+    end
+end)
+
+----------------------------------------------------------------
+-- GUI gốc
+----------------------------------------------------------------
+local gui = new("ScreenGui", {
+    Name = "HitboxHub_" .. math.random(1000, 9999),
+    ResetOnSpawn = false, IgnoreGuiInset = true, DisplayOrder = 999,
+    ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+}, nil)
+pcall(function() if syn and syn.protect_gui then syn.protect_gui(gui) end end)
+gui.Parent = getParent()
+
+local W, H = 310, 320
+local locked = false
+
+local main = new("CanvasGroup", {
+    Name = "Main", AnchorPoint = Vector2.new(0.5, 0.5),
+    Position = UDim2.new(0.5, 0, 0.5, 0), Size = UDim2.fromOffset(W, H),
+    BorderSizePixel = 0, GroupTransparency = 1, Visible = false,
+}, gui)
+reg(main, "BackgroundColor3", "bg")
+corner(main, 14)
+reg(new("UIStroke", {Thickness = 2, ApplyStrokeMode = Enum.ApplyStrokeMode.Border}, main), "Color", "accent")
+local uiScale = new("UIScale", {Scale = 0.8}, main)
+
+-- Thanh tiêu đề
+local titleBar = new("Frame", {Size = UDim2.new(1, 0, 0, 40), BorderSizePixel = 0}, main)
+reg(titleBar, "BackgroundColor3", "bg2")
+
+local lockBtn = new("TextButton", {
+    Position = UDim2.fromOffset(6, 6), Size = UDim2.fromOffset(28, 28), AutoButtonColor = false,
+    Text = "🔓", TextSize = 15, Font = Enum.Font.GothamBold, BorderSizePixel = 0,
+}, titleBar)
+reg(lockBtn, "BackgroundColor3", "bg"); corner(lockBtn, 8)
+
+local closeBtn = new("TextButton", {
+    Position = UDim2.new(1, -34, 0, 6), Size = UDim2.fromOffset(28, 28), AutoButtonColor = false,
+    Text = "✕", TextSize = 14, Font = Enum.Font.GothamBold, BorderSizePixel = 0,
+}, titleBar)
+reg(closeBtn, "BackgroundColor3", "bg"); reg(closeBtn, "TextColor3", "text"); corner(closeBtn, 8)
+
+local titleLbl = new("TextLabel", {
+    BackgroundTransparency = 1, Position = UDim2.fromOffset(40, 0), Size = UDim2.new(1, -80, 1, 0),
+    Text = "HITBOX HUB", Font = Enum.Font.GothamBlack, TextSize = 15,
+}, titleBar)
+reg(titleLbl, "TextColor3", "accent")
+
+-- Tab bar
+local tabBar = new("Frame", {Position = UDim2.fromOffset(8, 46), Size = UDim2.new(1, -16, 0, 28), BackgroundTransparency = 1}, main)
+new("UIListLayout", {FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder}, tabBar)
+
+local pages, tabs = {}, {}
+local order = {}
+local function nextOrder(p) order[p] = (order[p] or 0) + 1 return order[p] end
+
+local function makePage(name, idx, label)
+    local page = new("ScrollingFrame", {
+        Position = UDim2.fromOffset(8, 82), Size = UDim2.new(1, -16, 1, -90),
+        BackgroundTransparency = 1, BorderSizePixel = 0, ScrollBarThickness = 3,
+        CanvasSize = UDim2.new(), AutomaticCanvasSize = Enum.AutomaticSize.Y, Visible = false,
+    }, main)
+    reg(page, "ScrollBarImageColor3", "accent")
+    new("UIListLayout", {Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder}, page)
+    new("UIPadding", {PaddingBottom = UDim.new(0, 6)}, page)
+    pages[name] = page
+
+    local b = new("TextButton", {
+        Size = UDim2.new(0.5, -3, 1, 0), AutoButtonColor = false, Text = label,
+        Font = Enum.Font.GothamBold, TextSize = 12, TextColor3 = Color3.new(1, 1, 1),
+        BorderSizePixel = 0, LayoutOrder = idx, BackgroundTransparency = 0.6,
+    }, tabBar)
+    reg(b, "BackgroundColor3", "accent"); corner(b, 8)
+    tabs[name] = b
+    return page
+end
+
+local pHit   = makePage("Hitbox", 1, "🎯 Hitbox")
+local pTheme = makePage("Theme",  2, "🎨 Giao diện")
+
+local function selectTab(name)
+    for k, p in pairs(pages) do
+        if k == name then
+            p.Position = UDim2.fromOffset(8, 92)
+            p.Visible = true
+            tw(p, 0.25, {Position = UDim2.fromOffset(8, 82)}, Enum.EasingStyle.Quint)
+        else
+            p.Visible = false
+        end
+    end
+    for k, b in pairs(tabs) do tw(b, 0.2, {BackgroundTransparency = k == name and 0 or 0.65}) end
+end
+for k, b in pairs(tabs) do b.Activated:Connect(function() selectTab(k) end) end
+
+----------------------------------------------------------------
+-- Thành phần UI
+----------------------------------------------------------------
+local function row(page, h)
+    local f = new("Frame", {Size = UDim2.new(1, -6, 0, h), BorderSizePixel = 0, LayoutOrder = nextOrder(page)}, page)
+    reg(f, "BackgroundColor3", "bg2"); corner(f, 8)
+    return f
+end
+
+local function lbl(parent, text, pos, size, xa)
+    local l = new("TextLabel", {
+        BackgroundTransparency = 1, Position = pos, Size = size, Text = text,
+        Font = Enum.Font.GothamMedium, TextSize = 13, TextXAlignment = xa or Enum.TextXAlignment.Left,
+    }, parent)
+    reg(l, "TextColor3", "text")
+    return l
+end
+
+local function hover(b)
+    b.MouseEnter:Connect(function() tw(b, 0.15, {BackgroundTransparency = 0.2}) end)
+    b.MouseLeave:Connect(function() tw(b, 0.15, {BackgroundTransparency = 0}) end)
+end
+
+local function Toggle(page, text, default, cb)
+    local f = row(page, 36)
+    lbl(f, text, UDim2.fromOffset(10, 0), UDim2.new(1, -70, 1, 0))
+    local state = default
+    local track = new("TextButton", {
+        AutoButtonColor = false, Text = "", Size = UDim2.fromOffset(40, 20),
+        Position = UDim2.new(1, -50, 0.5, -10), BorderSizePixel = 0,
+    }, f)
+    corner(track, 10)
+    reg(track, "BackgroundColor3", function() return state and C("accent") or C("bg") end)
+    local knob = new("Frame", {
+        Size = UDim2.fromOffset(16, 16), BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0,
+        Position = state and UDim2.fromOffset(22, 2) or UDim2.fromOffset(2, 2),
+    }, track)
+    corner(knob, 8)
+    track.Activated:Connect(function()
+        state = not state
+        tw(knob, 0.2, {Position = state and UDim2.fromOffset(22, 2) or UDim2.fromOffset(2, 2)}, Enum.EasingStyle.Back)
+        tw(track, 0.2, {BackgroundColor3 = state and C("accent") or C("bg")})
+        cb(state)
+    end)
+end
+
+local function Slider(page, text, min, max, default, dec, cb)
+    local f = row(page, 50)
+    lbl(f, text, UDim2.fromOffset(10, 4), UDim2.new(0.6, 0, 0, 20))
+    local valLbl = lbl(f, tostring(default), UDim2.new(0.6, 0, 0, 4), UDim2.new(0.4, -10, 0, 20), Enum.TextXAlignment.Right)
+    local bar = new("Frame", {Position = UDim2.new(0, 10, 0, 33), Size = UDim2.new(1, -20, 0, 6), BorderSizePixel = 0}, f)
+    reg(bar, "BackgroundColor3", "bg"); corner(bar, 3)
+    local a0 = (default - min) / (max - min)
+    local fill = new("Frame", {Size = UDim2.new(a0, 0, 1, 0), BorderSizePixel = 0}, bar)
+    reg(fill, "BackgroundColor3", "accent"); corner(fill, 3)
+    local knob = new("Frame", {
+        Size = UDim2.fromOffset(14, 14), Position = UDim2.new(1, -7, 0.5, -7),
+        BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0,
+    }, fill)
+    corner(knob, 7)
+    local hit = new("TextButton", {Text = "", BackgroundTransparency = 1, Position = UDim2.new(0, 0, 0, 22), Size = UDim2.new(1, 0, 0, 28)}, f)
+
+    local dragging = false
+    local function update(x)
+        local a = math.clamp((x - bar.AbsolutePosition.X) / bar.AbsoluteSize.X, 0, 1)
+        local m = 10 ^ dec
+        local v = math.floor((min + (max - min) * a) * m + 0.5) / m
+        tw(fill, 0.06, {Size = UDim2.new(a, 0, 1, 0)})
+        valLbl.Text = tostring(v)
+        cb(v)
+    end
+    local function isPtr(i) return i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch end
+    hit.InputBegan:Connect(function(i)
+        if isPtr(i) then
+            dragging = true
+            page.ScrollingEnabled = false
+            tw(knob, 0.12, {Size = UDim2.fromOffset(18, 18), Position = UDim2.new(1, -9, 0.5, -9)})
+            update(i.Position.X)
+        end
+    end)
+    bind(UIS.InputChanged, function(i)
+        if dragging and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then
+            update(i.Position.X)
+        end
+    end)
+    bind(UIS.InputEnded, function(i)
+        if dragging and isPtr(i) then
+            dragging = false
+            page.ScrollingEnabled = true
+            tw(knob, 0.12, {Size = UDim2.fromOffset(14, 14), Position = UDim2.new(1, -7, 0.5, -7)})
+        end
+    end)
+end
+
+local function Choice(page, text, options, default, cb)
+    local f = row(page, 58)
+    lbl(f, text, UDim2.fromOffset(10, 4), UDim2.new(1, -20, 0, 20))
+    local holder = new("Frame", {BackgroundTransparency = 1, Position = UDim2.fromOffset(10, 28), Size = UDim2.new(1, -20, 0, 24)}, f)
+    new("UIListLayout", {FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder}, holder)
+    local sel = default
+    local btns = {}
+    for idx, opt in ipairs(options) do
+        local b = new("TextButton", {
+            AutoButtonColor = false, Size = UDim2.new(1 / #options, -4, 1, 0), Text = opt[1],
+            Font = Enum.Font.GothamMedium, TextSize = 12, BorderSizePixel = 0, LayoutOrder = idx,
+        }, holder)
+        corner(b, 6)
+        reg(b, "TextColor3", "text")
+        reg(b, "BackgroundColor3", function() return sel == idx and C("accent") or C("bg") end)
+        btns[idx] = b
+        b.Activated:Connect(function()
+            sel = idx
+            for k, x in ipairs(btns) do tw(x, 0.2, {BackgroundColor3 = sel == k and C("accent") or C("bg")}) end
+            cb(opt[2])
+        end)
+    end
+end
+
+local rainbowSeq = ColorSequence.new({
+    ColorSequenceKeypoint.new(0,    Color3.fromRGB(255, 0, 0)),
+    ColorSequenceKeypoint.new(0.17, Color3.fromRGB(255, 255, 0)),
+    ColorSequenceKeypoint.new(0.34, Color3.fromRGB(0, 255, 0)),
+    ColorSequenceKeypoint.new(0.5,  Color3.fromRGB(0, 255, 255)),
+    ColorSequenceKeypoint.new(0.67, Color3.fromRGB(0, 0, 255)),
+    ColorSequenceKeypoint.new(0.84, Color3.fromRGB(255, 0, 255)),
+    ColorSequenceKeypoint.new(1,    Color3.fromRGB(255, 0, 0)),
+})
+
+local function Swatches(page, text, list, cb)
+    local f = row(page, 58)
+    lbl(f, text, UDim2.fromOffset(10, 4), UDim2.new(1, -20, 0, 20))
+    local holder = new("Frame", {BackgroundTransparency = 1, Position = UDim2.fromOffset(10, 28), Size = UDim2.new(1, -20, 0, 24)}, f)
+    new("UIListLayout", {FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder}, holder)
+    local strokes = {}
+    for idx, c in ipairs(list) do
+        local b = new("TextButton", {
+            AutoButtonColor = false, Text = "", Size = UDim2.fromOffset(24, 24),
+            BackgroundColor3 = c, BorderSizePixel = 0, LayoutOrder = idx,
+        }, holder)
+        corner(b, 12)
+        local st = new("UIStroke", {Thickness = 2, Color = Color3.new(1, 1, 1), Transparency = idx == 1 and 0 or 1}, b)
+        strokes[idx] = st
+        b.Activated:Connect(function()
+            for k, s in ipairs(strokes) do tw(s, 0.2, {Transparency = k == idx and 0 or 1}) end
+            cb(c)
+        end)
+    end
+end
+
+local function Button(page, text, cb)
+    local b = new("TextButton", {
+        Size = UDim2.new(1, -6, 0, 34), AutoButtonColor = false, Text = text,
+        Font = Enum.Font.GothamBold, TextSize = 13, BorderSizePixel = 0, LayoutOrder = nextOrder(page),
+        TextColor3 = Color3.new(1, 1, 1),
+    }, page)
+    reg(b, "BackgroundColor3", "accent"); corner(b, 8); hover(b)
+    b.Activated:Connect(cb)
+    return b
+end
+
+----------------------------------------------------------------
+-- Tab HITBOX
+----------------------------------------------------------------
+Toggle(pHit, "Bật Hitbox", false, function(v)
+    S.Enabled = v
+    if not v then restoreAll() end
+end)
+Slider(pHit, "Kích thước", 2, 100, S.Size, 0, function(v) S.Size = v end)
+Slider(pHit, "Độ trong suốt", 0, 1, S.Transparency, 2, function(v) S.Transparency = v end)
+Slider(pHit, "Khoảng cách tối đa (studs)", 50, 3000, S.Dist, 0, function(v) S.Dist = v end)
+Choice(pHit, "Bộ phận", {{"Root", "HumanoidRootPart"}, {"Đầu", "Head"}, {"Thân", "Torso"}}, 1, function(v)
+    restoreAll(); S.Part = v
+end)
+Choice(pHit, "Chất liệu", {{"Neon", Enum.Material.Neon}, {"Lưới", Enum.Material.ForceField}, {"Nhựa", Enum.Material.SmoothPlastic}}, 1, function(v)
+    S.Material = v
+end)
+Swatches(pHit, "Màu hitbox", {
+    Color3.fromRGB(255, 60, 60), Color3.fromRGB(255, 150, 40), Color3.fromRGB(255, 230, 60),
+    Color3.fromRGB(60, 255, 110), Color3.fromRGB(60, 220, 255), Color3.fromRGB(70, 110, 255),
+    Color3.fromRGB(170, 80, 255), Color3.fromRGB(255, 90, 190),
+}, function(c) S.Color = c; S.RainbowHB = false end)
+Toggle(pHit, "Hitbox cầu vồng", false, function(v) S.RainbowHB = v end)
+Toggle(pHit, "Bỏ qua đồng đội", true, function(v) S.TeamCheck = v end)
+Toggle(pHit, "Bỏ qua người đã chết", true, function(v) S.IgnoreDead = v end)
+Button(pHit, "Khôi phục kích thước gốc", restoreAll)
+
+----------------------------------------------------------------
+-- Tab GIAO DIỆN
+----------------------------------------------------------------
+do
+    local gridRow = new("Frame", {
+        BackgroundTransparency = 1, Size = UDim2.new(1, -6, 0, math.ceil(#ThemeList / 2) * 38),
+        LayoutOrder = nextOrder(pTheme),
+    }, pTheme)
+    new("UIGridLayout", {
+        CellSize = UDim2.new(0.5, -4, 0, 34), CellPadding = UDim2.fromOffset(6, 4),
+        SortOrder = Enum.SortOrder.LayoutOrder,
+}
