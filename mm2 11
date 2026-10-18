@@ -1,0 +1,588 @@
+-- MM2 Hub v4 | Murder Mystery 2 | Delta X (mobile + PC)
+local Players = game:GetService("Players")
+local UIS = game:GetService("UserInputService")
+local RS = game:GetService("RunService")
+local TS = game:GetService("TweenService")
+local lp = Players.LocalPlayer
+
+local env = (getgenv and getgenv()) or _G
+if env.MM2Hub_Cleanup then pcall(env.MM2Hub_Cleanup) end
+
+local alive = true
+local conns = {}
+local function bind(sig, fn)
+	local c = sig:Connect(fn)
+	table.insert(conns, c)
+	return c
+end
+
+local function new(class, props, parent)
+	local o = Instance.new(class)
+	for k, v in pairs(props or {}) do o[k] = v end
+	o.Parent = parent
+	return o
+end
+local function corner(o, r) new("UICorner", {CornerRadius = UDim.new(0, r or 8)}, o) end
+
+------------------------------------------------ GUI root
+local gui = new("ScreenGui", {
+	Name = "MM2Hub", ResetOnSpawn = false, IgnoreGuiInset = true,
+	ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+})
+local ok = pcall(function() gui.Parent = (gethui and gethui()) or game:GetService("CoreGui") end)
+if not ok or not gui.Parent then gui.Parent = lp:WaitForChild("PlayerGui") end
+
+------------------------------------------------ Themes
+local themes = {
+	{name = "Dark",      bg = Color3.fromRGB(20, 20, 26), panel = Color3.fromRGB(38, 38, 50), accent = Color3.fromRGB(95, 140, 255)},
+	{name = "Purple",    bg = Color3.fromRGB(24, 16, 36), panel = Color3.fromRGB(46, 32, 70), accent = Color3.fromRGB(170, 110, 255)},
+	{name = "Ocean",     bg = Color3.fromRGB(12, 26, 38), panel = Color3.fromRGB(24, 52, 74), accent = Color3.fromRGB(60, 200, 230)},
+	{name = "Sunset",    bg = Color3.fromRGB(38, 20, 16), panel = Color3.fromRGB(70, 40, 30), accent = Color3.fromRGB(255, 140, 70)},
+	{name = "RGB",       rainbow = true},
+	{name = "Valentine", bg = Color3.fromRGB(46, 14, 30), panel = Color3.fromRGB(82, 28, 54), accent = Color3.fromRGB(255, 95, 150), particle = "❤"},
+	{name = "Lucky",     bg = Color3.fromRGB(12, 36, 22), panel = Color3.fromRGB(24, 66, 40), accent = Color3.fromRGB(80, 220, 110), particle = "🍀"},
+}
+local current = themes[1]
+
+------------------------------------------------ Lock + drag
+local locked = false
+local moved = {}
+
+local function makeDraggable(obj, handle)
+	handle = handle or obj
+	local dragging, startPos, startObj = false, nil, nil
+	bind(handle.InputBegan, function(i)
+		if locked then return end
+		if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+			dragging = true
+			moved[obj] = false
+			startPos = i.Position
+			startObj = obj.Position
+		end
+	end)
+	bind(handle.InputEnded, function(i)
+		if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+			dragging = false
+		end
+	end)
+	bind(UIS.InputChanged, function(i)
+		if not dragging or locked then return end
+		if i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch then
+			local d = i.Position - startPos
+			if d.Magnitude > 6 then moved[obj] = true end
+			obj.Position = UDim2.new(startObj.X.Scale, startObj.X.Offset + d.X, startObj.Y.Scale, startObj.Y.Offset + d.Y)
+		end
+	end)
+end
+
+------------------------------------------------ Main window
+local FULL = UDim2.fromOffset(260, 360)
+local main = new("Frame", {
+	Name = "Main", Size = FULL, Position = UDim2.new(0.5, -130, 0.2, 0),
+	BackgroundColor3 = themes[1].bg, ClipsDescendants = true, BorderSizePixel = 0,
+}, gui)
+corner(main, 12)
+local stroke = new("UIStroke", {Thickness = 1.5, Color = themes[1].accent}, main)
+
+local top = new("Frame", {Size = UDim2.new(1, 0, 0, 56), BackgroundTransparency = 1, ZIndex = 3}, main)
+local credit = new("TextLabel", {
+	Size = UDim2.new(1, 0, 0, 16), Position = UDim2.fromOffset(0, 3), BackgroundTransparency = 1,
+	Text = "by CLAUDE SONNET 5.5", Font = Enum.Font.GothamBold, TextSize = 11,
+	TextColor3 = themes[1].accent, TextTransparency = 0.1, ZIndex = 4,
+}, top)
+local lockBtn = new("TextButton", {
+	Size = UDim2.fromOffset(34, 34), Position = UDim2.fromOffset(8, 20),
+	Text = "🔓", TextSize = 18, Font = Enum.Font.GothamBold, TextColor3 = Color3.new(1, 1, 1),
+	BackgroundColor3 = Color3.fromRGB(50, 50, 60), BackgroundTransparency = 0.25, AutoButtonColor = false, ZIndex = 4,
+}, top)
+corner(lockBtn, 10)
+local title = new("TextLabel", {
+	Size = UDim2.new(1, -60, 0, 34), Position = UDim2.fromOffset(52, 20), BackgroundTransparency = 1,
+	Text = "MM2 Hub", TextXAlignment = Enum.TextXAlignment.Left, Font = Enum.Font.GothamBold,
+	TextSize = 18, TextColor3 = themes[1].accent, ZIndex = 4,
+}, top)
+
+local list = new("ScrollingFrame", {
+	Size = UDim2.new(1, -16, 1, -64), Position = UDim2.fromOffset(8, 58), BackgroundTransparency = 1,
+	BorderSizePixel = 0, ScrollBarThickness = 3, CanvasSize = UDim2.new(),
+	AutomaticCanvasSize = Enum.AutomaticSize.Y, ZIndex = 3,
+}, main)
+new("UIListLayout", {Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder}, list)
+
+makeDraggable(main, top)
+
+------------------------------------------------ Small open/close button
+local small = new("TextButton", {
+	Name = "Small", Size = UDim2.fromOffset(44, 44), Position = UDim2.new(0, 12, 0.4, 0),
+	Text = "☰", TextSize = 22, Font = Enum.Font.GothamBold, TextColor3 = Color3.new(1, 1, 1),
+	BackgroundColor3 = themes[1].accent, AutoButtonColor = false, ZIndex = 10,
+}, gui)
+corner(small, 22)
+makeDraggable(small)
+
+local open = true
+bind(small.Activated, function()
+	if moved[small] then moved[small] = false return end
+	open = not open
+	if open then
+		main.Visible = true
+		TS:Create(main, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Size = FULL}):Play()
+	else
+		local t = TS:Create(main, TweenInfo.new(0.2, Enum.EasingStyle.Quad), {Size = UDim2.fromOffset(260, 0)})
+		t:Play()
+		t.Completed:Connect(function() if not open then main.Visible = false end end)
+	end
+end)
+
+bind(lockBtn.Activated, function()
+	locked = not locked
+	lockBtn.Text = locked and "🔒" or "🔓"
+end)
+
+------------------------------------------------ Rows + painting
+local rows = {}
+local info
+
+local function paint()
+	local t = current
+	local h = (os.clock() * 0.25) % 1
+	local acc = t.rainbow and Color3.fromHSV(h, 0.65, 1) or t.accent
+	local bg = t.rainbow and Color3.fromHSV(h, 0.5, 0.16) or t.bg
+	local panel = t.rainbow and Color3.fromHSV(h, 0.45, 0.28) or t.panel
+	main.BackgroundColor3 = bg
+	stroke.Color = acc
+	title.TextColor3 = acc
+	credit.TextColor3 = acc
+	small.BackgroundColor3 = acc
+	if info then info.TextColor3 = acc end
+	for _, r in ipairs(rows) do
+		r.btn.BackgroundColor3 = r.on() and acc or panel
+	end
+end
+
+info = new("TextLabel", {
+	Size = UDim2.new(1, -6, 0, 44), BackgroundTransparency = 0.4, BackgroundColor3 = Color3.fromRGB(0, 0, 0),
+	Text = "Roles: ...", TextWrapped = true, Font = Enum.Font.GothamMedium, TextSize = 13,
+	TextColor3 = themes[1].accent, ZIndex = 3, LayoutOrder = 1,
+}, list)
+corner(info, 10)
+
+local grid = new("Frame", {
+	Size = UDim2.new(1, -6, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+	BackgroundTransparency = 1, ZIndex = 3, LayoutOrder = 2,
+}, list)
+new("UIGridLayout", {
+	CellSize = UDim2.new(0.5, -4, 0, 42), CellPadding = UDim2.fromOffset(8, 8),
+	SortOrder = Enum.SortOrder.LayoutOrder,
+}, grid)
+
+local function makeBtn(text)
+	local b = new("TextButton", {
+		BackgroundTransparency = 0.1, Text = text, Font = Enum.Font.GothamMedium, TextSize = 13,
+		TextWrapped = true, TextColor3 = Color3.new(1, 1, 1), TextStrokeTransparency = 0.7,
+		AutoButtonColor = false, ZIndex = 3,
+	}, grid)
+	corner(b, 10)
+	return b
+end
+
+local function addToggle(name, cb)
+	local on = false
+	local b = makeBtn(name)
+	local function set(v)
+		on = v
+		b.Text = name .. (on and "  ✓" or "")
+		paint()
+		cb(on)
+	end
+	table.insert(rows, {btn = b, on = function() return on end})
+	bind(b.Activated, function() set(not on) end)
+	return set, function() return on end
+end
+
+local function addAction(name, fn)
+	local b = makeBtn(name)
+	b.BackgroundColor3 = Color3.fromRGB(60, 60, 75)
+	bind(b.Activated, function() fn(b) end)
+	return b
+end
+
+------------------------------------------------ Helpers
+local state = {esp = false, gunesp = false, aim = false, shift = false, antifling = false, tptool = false}
+
+local function char() return lp.Character end
+local function hum() local c = char() return c and c:FindFirstChildOfClass("Humanoid") end
+local function hrp() local c = char() return c and c:FindFirstChild("HumanoidRootPart") end
+
+local function roleOf(p)
+	local c = p.Character
+	local bp = p:FindFirstChild("Backpack")
+	local function has(n) return (c and c:FindFirstChild(n)) or (bp and bp:FindFirstChild(n)) end
+	if has("Knife") then return "M" end
+	if has("Gun") then return "S" end
+	return "I"
+end
+local roleColor = {M = Color3.fromRGB(255, 50, 50), S = Color3.fromRGB(60, 140, 255), I = Color3.fromRGB(80, 255, 120)}
+
+------------------------------------------------ ESP người
+local function clearESP()
+	for _, p in ipairs(Players:GetPlayers()) do
+		local c = p.Character
+		local h = c and c:FindFirstChild("MM2ESP")
+		if h then h:Destroy() end
+	end
+end
+
+local function updateESP()
+	for _, p in ipairs(Players:GetPlayers()) do
+		if p ~= lp and p.Character then
+			local h = p.Character:FindFirstChild("MM2ESP")
+			if not h then
+				h = new("Highlight", {Name = "MM2ESP", FillTransparency = 0.5, OutlineTransparency = 0,
+					DepthMode = Enum.HighlightDepthMode.AlwaysOnTop}, p.Character)
+			end
+			local col = roleColor[roleOf(p)]
+			h.FillColor = col
+			h.OutlineColor = col
+		end
+	end
+end
+
+local murderer -- Player
+local function updateInfo()
+	local m, s = "?", "?"
+	murderer = nil
+	for _, p in ipairs(Players:GetPlayers()) do
+		local r = roleOf(p)
+		if r == "M" then
+			m = p.Name
+			if p ~= lp then murderer = p end
+		elseif r == "S" then
+			s = p.Name
+		end
+	end
+	info.Text = "🔪 Murderer: " .. m .. "\n🔫 Sheriff: " .. s
+end
+
+------------------------------------------------ Gun ESP + TP
+local gun
+local function findGun()
+	if gun and gun.Parent then return gun end
+	gun = nil
+	local g = workspace:FindFirstChild("GunDrop", true)
+	if g then
+		gun = g:IsA("BasePart") and g or g:FindFirstChildWhichIsA("BasePart", true)
+	end
+	return gun
+end
+
+local gunLine = new("Frame", {
+	Name = "GunLine", AnchorPoint = Vector2.new(0.5, 0.5), BackgroundColor3 = Color3.fromRGB(255, 230, 60),
+	BorderSizePixel = 0, Visible = false, ZIndex = 20, Size = UDim2.fromOffset(0, 2),
+}, gui)
+
+local function clearGunESP()
+	gunLine.Visible = false
+	for _, d in ipairs(workspace:GetDescendants()) do
+		if d.Name == "MM2GunESP" then d:Destroy() end
+	end
+end
+
+local function updateGunESP()
+	local g = findGun()
+	if g and not g:FindFirstChild("MM2GunESP") then
+		new("Highlight", {Name = "MM2GunESP", FillColor = Color3.fromRGB(255, 230, 60),
+			OutlineColor = Color3.fromRGB(255, 255, 255), FillTransparency = 0.3,
+			DepthMode = Enum.HighlightDepthMode.AlwaysOnTop, Adornee = g}, g)
+	end
+end
+
+bind(RS.RenderStepped, function()
+	updateESP()
+	updateInfo()
+	if state.gunesp then updateGunESP() end
+	
+	if not state.gunesp or not gun or not gun.Parent then
+		gunLine.Visible = false
+		return
+	end
+	local cam = workspace.CurrentCamera
+	local vs = cam.ViewportSize
+	local v = cam:WorldToViewportPoint(gun.Position)
+	local ex, ey = v.X, v.Y
+	if v.Z < 0 then
+		ex, ey = vs.X - ex, vs.Y - ey
+	end
+	local sx, sy = vs.X / 2, 0
+	local dx, dy = ex - sx, ey - sy
+	local len = math.sqrt(dx * dx + dy * dy)
+	gunLine.Size = UDim2.fromOffset(len, 2)
+	gunLine.Position = UDim2.fromOffset(sx + dx / 2, sy + dy / 2)
+	gunLine.Rotation = math.deg(math.atan2(dy, dx))
+	gunLine.Visible = true
+end)
+
+local tping = false
+local function tpGun(btn)
+	if tping then return end
+	local g = findGun()
+	local root = hrp()
+	if not g or not root then
+		local old = btn.Text
+		btn.Text = "Chưa có súng"
+		task.delay(1.2, function() if btn.Parent then btn.Text = old end end)
+		return
+	end
+	tping = true
+	local back = root.CFrame
+	root.CFrame = g.CFrame + Vector3.new(0, 2, 0)
+	task.wait(2)
+	root = hrp()
+	if root then
+		root.CFrame = back
+		root.AssemblyLinearVelocity = Vector3.zero
+	end
+	tping = false
+end
+
+------------------------------------------------ Aimbot Murderer
+local rayParams = RaycastParams.new()
+rayParams.FilterType = Enum.RaycastFilterType.Exclude
+rayParams.IgnoreWater = true
+
+local function aimStep()
+	if not state.aim or not murderer then return end
+	local mc, myc = murderer.Character, char()
+	if not mc or not myc then return end
+	local hm = mc:FindFirstChildOfClass("Humanoid")
+	if not hm or hm.Health <= 0 then return end
+	local tgt = mc:FindFirstChild("UpperTorso") or mc:FindFirstChild("Torso") or mc:FindFirstChild("HumanoidRootPart")
+	if not tgt then return end
+	local cam = workspace.CurrentCamera
+	local origin = cam.CFrame.Position
+	rayParams.FilterDescendantsInstances = {myc}
+	local res = workspace:Raycast(origin, tgt.Position - origin, rayParams)
+	if res and not res.Instance:IsDescendantOf(mc) then return end
+	cam.CFrame = CFrame.lookAt(origin, tgt.Position)
+end
+RS:BindToRenderStep("MM2Aim", Enum.RenderPriority.Camera.Value + 1, aimStep)
+
+------------------------------------------------ Shift Lock
+local ugs
+pcall(function() ugs = UserSettings():GetService("UserGameSettings") end)
+
+local cursor = new("ImageLabel", {
+	Name = "ShiftLockCursor", AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5),
+	Size = UDim2.fromOffset(32, 32), BackgroundTransparency = 1,
+	Image = "rbxasset://textures/MouseLockedCursor.png", Visible = false, ZIndex = 15,
+}, gui)
+
+local SHIFT_OFFSET = Vector3.new(1.75, 0, 0)
+
+local function shiftStep()
+	local h, root = hum(), hrp()
+	if not h or not root then return end
+	if state.shift then
+		local cam = workspace.CurrentCamera
+		local look = cam.CFrame.LookVector
+		h.AutoRotate = false
+		h.CameraOffset = h.CameraOffset:Lerp(SHIFT_OFFSET, 0.3)
+		root.CFrame = CFrame.lookAt(root.Position, root.Position + Vector3.new(look.X, 0, look.Z))
+		if UIS.MouseEnabled and not UIS.TouchEnabled then
+			UIS.MouseBehavior = Enum.MouseBehavior.LockCenter
+		end
+	elseif h.CameraOffset.Magnitude > 0.01 then
+		h.CameraOffset = h.CameraOffset:Lerp(Vector3.zero, 0.3)
+	end
+end
+RS:BindToRenderStep("MM2Shift", Enum.RenderPriority.Character.Value + 1, shiftStep)
+
+local function applyShift(v)
+	state.shift = v
+	cursor.Visible = v
+	pcall(function()
+		if ugs then ugs.RotationType = v and Enum.RotationType.CameraRelative or Enum.RotationType.MovementRelative end
+	end)
+	if not v then
+		local h = hum()
+		if h then h.AutoRotate = true end
+		UIS.MouseBehavior = Enum.MouseBehavior.Default
+	end
+end
+
+------------------------------------------------ Chống fling
+local lastSafe
+bind(RS.Stepped, function()
+	if not state.antifling then return end
+	for _, p in ipairs(Players:GetPlayers()) do
+		if p ~= lp and p.Character then
+			for _, part in ipairs(p.Character:GetChildren()) do
+				if part:IsA("BasePart") and part.CanCollide then part.CanCollide = false end
+			end
+		end
+	end
+	local root = hrp()
+	if root then
+		local lv, av = root.AssemblyLinearVelocity, root.AssemblyAngularVelocity
+		if lv.Magnitude > 150 or av.Magnitude > 60 then
+			root.AssemblyLinearVelocity = Vector3.zero
+			root.AssemblyAngularVelocity = Vector3.zero
+			if lastSafe then root.CFrame = lastSafe end
+		else
+			lastSafe = root.CFrame
+		end
+	end
+end)
+
+------------------------------------------------ TP Lobby / TP Map
+local function tpTo(cf)
+	local root = hrp()
+	if not root then return false end
+	root.CFrame = cf
+	root.AssemblyLinearVelocity = Vector3.zero
+	root.AssemblyAngularVelocity = Vector3.zero
+	return true
+end
+
+local function spawnPoint(model)
+	local parts = {}
+	local sp = model:FindFirstChild("Spawns", true)
+	if sp then
+		for _, c in ipairs(sp:GetChildren()) do
+			if c:IsA("BasePart") then table.insert(parts, c) end
+		end
+	end
+	if #parts == 0 then
+		for _, d in ipairs(model:GetDescendants()) do
+			if d:IsA("SpawnLocation") or (d:IsA("BasePart") and d.Name == "Spawn") then
+				table.insert(parts, d)
+			end
+		end
+	end
+	if #parts > 0 then
+		return parts[math.random(#parts)].CFrame + Vector3.new(0, 4, 0)
+	end
+	local okp, cf = pcall(function() return model:GetPivot() end)
+	if okp then return cf + Vector3.new(0, 6, 0) end
+end
+
+local function findMap()
+	for _, m in ipairs(workspace:GetChildren()) do
+		if m:IsA("Model") and m.Name ~= "Lobby" and not Players:GetPlayerFromCharacter(m)
+			and (m:FindFirstChild("CoinContainer", true) or m:FindFirstChild("Spawns", true)) then
+			return m
+		end
+	end
+end
+
+local function flash(btn, msg)
+	local old = btn.Text
+	btn.Text = msg
+	task.delay(1.2, function() if btn.Parent then btn.Text = old end end)
+end
+
+local function tpLobby(btn)
+	local lobby = workspace:FindFirstChild("Lobby")
+	local cf = lobby and spawnPoint(lobby)
+	if not cf or not tpTo(cf) then flash(btn, "Không thấy Lobby") end
+end
+
+local function tpMap(btn)
+	local map = findMap()
+	local cf = map and spawnPoint(map)
+	if not cf or not tpTo(cf) then flash(btn, "Chưa có map") end
+end
+
+------------------------------------------------ TP Tool
+local tpTool
+local mouse = lp:GetMouse()
+
+local function toolAlive()
+	return tpTool and (tpTool:IsDescendantOf(lp) or (char() and tpTool:IsDescendantOf(char())))
+end
+
+local function ensureTool()
+	if toolAlive() then return end
+	local bp = lp:FindFirstChildOfClass("Backpack")
+	if not bp then return end
+	if tpTool then pcall(function() tpTool:Destroy() end) end
+	tpTool = new("Tool", {Name = "TP Tool", RequiresHandle = false, CanBeDropped = false, ToolTip = "Chạm để dịch chuyển"})
+	tpTool.Activated:Connect(function()
+		local root = hrp()
+		if root and mouse.Hit then
+			local pos = mouse.Hit.Position + Vector3.new(0, 3, 0)
+			root.CFrame = CFrame.new(pos) * (root.CFrame - root.CFrame.Position)
+			root.AssemblyLinearVelocity = Vector3.zero
+		end
+	end)
+	tpTool.Parent = bp
+end
+
+local function removeTool()
+	if tpTool then pcall(function() tpTool:Destroy() end) end
+	tpTool = nil
+end
+
+------------------------------------------------ Buttons
+addToggle("ESP người", function(v)
+	state.esp = v
+	if not v then clearESP() else updateESP() end
+end)
+addToggle("ESP súng", function(v)
+	state.gunesp = v
+	if not v then clearGunESP() else updateGunESP() end
+end)
+addAction("TP súng (2s)", tpGun)
+addAction("TP Lobby", tpLobby)
+addAction("TP Map", tpMap)
+addToggle("TP Tool", function(v)
+	state.tptool = v
+	if v then ensureTool() else removeTool() end
+end)
+addToggle("Aim Murder", function(v) state.aim = v end)
+local setShift, getShift = addToggle("Shift Lock", applyShift)
+addToggle("Chống Fling", function(v) state.antifling = v end)
+addToggle("Anti-AFK", function(v) env.MM2Hub_AFK = v end)
+
+bind(UIS.InputBegan, function(i, gpe)
+	if gpe then return end
+	if i.KeyCode == Enum.KeyCode.LeftShift then setShift(not getShift()) end
+end)
+
+bind(lp.Idled, function()
+	if env.MM2Hub_AFK then
+		pcall(function()
+			local vu = game:GetService("VirtualUser")
+			vu:CaptureController()
+			vu:ClickButton2(Vector2.new())
+		end)
+	end
+end)
+
+bind(RS.Heartbeat, function()
+	if current.rainbow then paint() end
+end)
+
+------------------------------------------------ Theme picker
+new("TextLabel", {
+	Size = UDim2.new(1, -6, 0, 18), BackgroundTransparency = 1, Text = "Màu giao diện",
+	Font = Enum.Font.GothamMedium, TextSize = 13, TextColor3 = Color3.new(1, 1, 1), ZIndex = 3, LayoutOrder = 3,
+}, list)
+local dots = new("Frame", {
+	Size = UDim2.new(1, -6, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+	BackgroundTransparency = 1, ZIndex = 3, LayoutOrder = 4,
+}, list)
+new("UIGridLayout", {CellSize = UDim2.fromOffset(28, 28), CellPadding = UDim2.fromOffset(4, 4)}, dots)
+
+for _, t in ipairs(themes) do
+	local d = new("TextButton", {
+		Text = t.particle or "", TextSize = 15, BackgroundColor3 = t.accent or Color3.new(1, 1, 1),
+		AutoButtonColor = false, ZIndex = 4,
+	}, dots)
+	corner(d, 15)
+	if t.rainbow then
+		new("UIGradient", {Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 0, 0)),
+			ColorSequenceKeypoint.new(0.2, Color3.fromRGB(255, 127, 0)),
+			ColorSequenceKeypoint.new(0.4, Color3.fromRGB(255, 255, 0)),
+			ColorSequenceKeypoint.new(0.6, Color3.fromRGB(0, 2
