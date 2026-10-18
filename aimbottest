@@ -1,0 +1,353 @@
+--// Aimbot đa chức năng - Delta X
+--// Nút nhỏ: đóng/mở menu | Nút 🔒 góc trên-trái menu: khoá di chuyển menu + nút nhỏ
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UIS = game:GetService("UserInputService")
+local Workspace = game:GetService("Workspace")
+
+local LocalPlayer = Players.LocalPlayer
+local Camera = Workspace.CurrentCamera
+
+-- Xoá GUI cũ nếu chạy lại
+local GUI_NAME = "DeltaAimbotGUI"
+pcall(function()
+	for _, p in ipairs({ (gethui and gethui()) or nil, game:GetService("CoreGui"), LocalPlayer:FindFirstChildOfClass("PlayerGui") }) do
+		if p and p:FindFirstChild(GUI_NAME) then p[GUI_NAME]:Destroy() end
+	end
+end)
+if getgenv then
+	if getgenv().__AimConn then pcall(function() getgenv().__AimConn:Disconnect() end) end
+end
+
+---------------------------------------------------------------------
+-- CÀI ĐẶT
+---------------------------------------------------------------------
+local S = {
+	Enabled = false,
+	ShowFOV = true,
+	FOV = 150,
+	Smooth = 0.30,      -- càng nhỏ càng mượt/chậm, 1 = khoá cứng
+	TeamCheck = true,
+	WallCheck = true,
+	AliveCheck = true,
+	MaxDist = 1000,
+	Prediction = 0,     -- 0 = tắt
+	TargetPart = 1,
+}
+local PARTS = { "Head", "Thân", "HumanoidRootPart" }
+local locked = false
+
+---------------------------------------------------------------------
+-- GUI
+---------------------------------------------------------------------
+local gui = Instance.new("ScreenGui")
+gui.Name = GUI_NAME
+gui.ResetOnSpawn = false
+gui.IgnoreGuiInset = true
+gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+gui.DisplayOrder = 999
+
+local ok = pcall(function()
+	if gethui then gui.Parent = gethui()
+	else gui.Parent = game:GetService("CoreGui") end
+end)
+if not ok or not gui.Parent then
+	gui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+end
+
+local function corner(o, r)
+	local c = Instance.new("UICorner")
+	c.CornerRadius = UDim.new(0, r or 8)
+	c.Parent = o
+	return c
+end
+
+-- FOV circle
+local fovFrame = Instance.new("Frame")
+fovFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+fovFrame.BackgroundTransparency = 1
+fovFrame.Parent = gui
+corner(fovFrame, 1000)
+local fovStroke = Instance.new("UIStroke")
+fovStroke.Color = Color3.fromRGB(255, 255, 255)
+fovStroke.Thickness = 1.5
+fovStroke.Parent = fovFrame
+
+-- Menu chính
+local main = Instance.new("Frame")
+main.Name = "Main"
+main.Size = UDim2.fromOffset(230, 320)
+main.Position = UDim2.new(0.5, -115, 0.5, -160)
+main.BackgroundColor3 = Color3.fromRGB(24, 24, 30)
+main.BorderSizePixel = 0
+main.Parent = gui
+corner(main, 10)
+
+local titleBar = Instance.new("Frame")
+titleBar.Size = UDim2.new(1, 0, 0, 32)
+titleBar.BackgroundColor3 = Color3.fromRGB(38, 38, 48)
+titleBar.BorderSizePixel = 0
+titleBar.Active = true
+titleBar.Parent = main
+corner(titleBar, 10)
+
+local lockBtn = Instance.new("TextButton") -- góc trên-trái
+lockBtn.Size = UDim2.fromOffset(26, 26)
+lockBtn.Position = UDim2.fromOffset(4, 3)
+lockBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 75)
+lockBtn.Text = "🔓"
+lockBtn.TextSize = 14
+lockBtn.Font = Enum.Font.GothamBold
+lockBtn.TextColor3 = Color3.new(1, 1, 1)
+lockBtn.Parent = titleBar
+corner(lockBtn, 6)
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, -40, 1, 0)
+title.Position = UDim2.fromOffset(36, 0)
+title.BackgroundTransparency = 1
+title.Text = "AIMBOT • Delta"
+title.TextXAlignment = Enum.TextXAlignment.Left
+title.Font = Enum.Font.GothamBold
+title.TextSize = 14
+title.TextColor3 = Color3.new(1, 1, 1)
+title.Parent = titleBar
+
+local list = Instance.new("ScrollingFrame")
+list.Size = UDim2.new(1, -12, 1, -42)
+list.Position = UDim2.fromOffset(6, 38)
+list.BackgroundTransparency = 1
+list.BorderSizePixel = 0
+list.ScrollBarThickness = 3
+list.AutomaticCanvasSize = Enum.AutomaticSize.Y
+list.CanvasSize = UDim2.new()
+list.Parent = main
+local layout = Instance.new("UIListLayout")
+layout.Padding = UDim.new(0, 5)
+layout.Parent = list
+
+-- Nút nhỏ đóng/mở
+local mini = Instance.new("TextButton")
+mini.Name = "Mini"
+mini.Size = UDim2.fromOffset(40, 40)
+mini.Position = UDim2.new(0, 10, 0.5, -20)
+mini.BackgroundColor3 = Color3.fromRGB(38, 38, 48)
+mini.Text = "🎯"
+mini.TextSize = 20
+mini.AutoButtonColor = true
+mini.Parent = gui
+corner(mini, 20)
+local miniStroke = Instance.new("UIStroke")
+miniStroke.Color = Color3.fromRGB(0, 200, 120)
+miniStroke.Thickness = 2
+miniStroke.Parent = mini
+
+---------------------------------------------------------------------
+-- KÉO THẢ (tôn trọng nút khoá)
+---------------------------------------------------------------------
+local function makeDraggable(obj, handle)
+	local state = { moved = false }
+	local dragging, dragStart, startPos
+	handle.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1
+			or input.UserInputType == Enum.UserInputType.Touch then
+			state.moved = false
+			if locked then return end
+			dragging = true
+			dragStart = input.Position
+			startPos = obj.Position
+			input.Changed:Connect(function()
+				if input.UserInputState == Enum.UserInputState.End then dragging = false end
+			end)
+		end
+	end)
+	UIS.InputChanged:Connect(function(input)
+		if dragging and not locked
+			and (input.UserInputType == Enum.UserInputType.MouseMovement
+			or input.UserInputType == Enum.UserInputType.Touch) then
+			local d = input.Position - dragStart
+			if d.Magnitude > 5 then state.moved = true end
+			obj.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X,
+				startPos.Y.Scale, startPos.Y.Offset + d.Y)
+		end
+	end)
+	return state
+end
+
+makeDraggable(main, titleBar)
+local miniState = makeDraggable(mini, mini)
+
+mini.Activated:Connect(function()
+	if miniState.moved then return end
+	main.Visible = not main.Visible
+end)
+
+lockBtn.Activated:Connect(function()
+	locked = not locked
+	lockBtn.Text = locked and "🔒" or "🔓"
+	lockBtn.BackgroundColor3 = locked and Color3.fromRGB(200, 70, 70) or Color3.fromRGB(60, 60, 75)
+end)
+
+---------------------------------------------------------------------
+-- THÀNH PHẦN UI
+---------------------------------------------------------------------
+local function toggleRow(text, key)
+	local b = Instance.new("TextButton")
+	b.Size = UDim2.new(1, -4, 0, 30)
+	b.BackgroundColor3 = Color3.fromRGB(44, 44, 56)
+	b.Font = Enum.Font.Gotham
+	b.TextSize = 13
+	b.TextColor3 = Color3.new(1, 1, 1)
+	b.Parent = list
+	corner(b, 6)
+	local function refresh()
+		b.Text = text .. ": " .. (S[key] and "BẬT" or "TẮT")
+		b.BackgroundColor3 = S[key] and Color3.fromRGB(0, 150, 95) or Color3.fromRGB(44, 44, 56)
+	end
+	refresh()
+	b.Activated:Connect(function() S[key] = not S[key]; refresh() end)
+end
+
+local function stepRow(text, key, min, max, step, fmt)
+	local f = Instance.new("Frame")
+	f.Size = UDim2.new(1, -4, 0, 30)
+	f.BackgroundColor3 = Color3.fromRGB(44, 44, 56)
+	f.Parent = list
+	corner(f, 6)
+
+	local lbl = Instance.new("TextLabel")
+	lbl.Size = UDim2.new(1, -70, 1, 0)
+	lbl.Position = UDim2.fromOffset(8, 0)
+	lbl.BackgroundTransparency = 1
+	lbl.TextXAlignment = Enum.TextXAlignment.Left
+	lbl.Font = Enum.Font.Gotham
+	lbl.TextSize = 13
+	lbl.TextColor3 = Color3.new(1, 1, 1)
+	lbl.Parent = f
+
+	local function refresh()
+		lbl.Text = text .. ": " .. string.format(fmt or "%d", S[key])
+	end
+	refresh()
+
+	local function btn(t, x, d)
+		local b = Instance.new("TextButton")
+		b.Size = UDim2.fromOffset(28, 22)
+		b.Position = UDim2.new(1, x, 0.5, -11)
+		b.BackgroundColor3 = Color3.fromRGB(70, 70, 90)
+		b.Text = t
+		b.Font = Enum.Font.GothamBold
+		b.TextSize = 16
+		b.TextColor3 = Color3.new(1, 1, 1)
+		b.Parent = f
+		corner(b, 5)
+		b.Activated:Connect(function()
+			S[key] = math.clamp(math.floor((S[key] + d * step) / step * 1000 + 0.5) / 1000 * step, min, max)
+			refresh()
+		end)
+	end
+	btn("-", -64, -1)
+	btn("+", -34, 1)
+end
+
+local function cycleRow()
+	local b = Instance.new("TextButton")
+	b.Size = UDim2.new(1, -4, 0, 30)
+	b.BackgroundColor3 = Color3.fromRGB(44, 44, 56)
+	b.Font = Enum.Font.Gotham
+	b.TextSize = 13
+	b.TextColor3 = Color3.new(1, 1, 1)
+	b.Parent = list
+	corner(b, 6)
+	local function refresh() b.Text = "Mục tiêu: " .. PARTS[S.TargetPart] end
+	refresh()
+	b.Activated:Connect(function()
+		S.TargetPart = S.TargetPart % #PARTS + 1
+		refresh()
+	end)
+end
+
+toggleRow("Aimbot", "Enabled")
+toggleRow("Hiện vòng FOV", "ShowFOV")
+stepRow("FOV", "FOV", 30, 600, 10)
+stepRow("Độ mượt", "Smooth", 0.05, 1, 0.05, "%.2f")
+cycleRow()
+toggleRow("Check đồng đội", "TeamCheck")
+toggleRow("Check vật cản", "WallCheck")
+toggleRow("Check còn sống", "AliveCheck")
+stepRow("Khoảng cách", "MaxDist", 50, 3000, 50)
+stepRow("Dự đoán", "Prediction", 0, 0.3, 0.02, "%.2f")
+
+---------------------------------------------------------------------
+-- LOGIC AIMBOT
+---------------------------------------------------------------------
+local rayParams = RaycastParams.new()
+rayParams.FilterType = Enum.RaycastFilterType.Exclude
+
+local function getPart(char)
+	local name = PARTS[S.TargetPart]
+	if name == "Thân" then
+		return char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso")
+	end
+	return char:FindFirstChild(name)
+end
+
+local function visible(part, char)
+	rayParams.FilterDescendantsInstances = { LocalPlayer.Character, char, Camera }
+	local origin = Camera.CFrame.Position
+	local hit = Workspace:Raycast(origin, part.Position - origin, rayParams)
+	return hit == nil
+end
+
+local function getTarget()
+	local vp = Camera.ViewportSize
+	local center = Vector2.new(vp.X / 2, vp.Y / 2)
+	local best, bestDist = nil, S.FOV
+
+	for _, plr in ipairs(Players:GetPlayers()) do
+		if plr ~= LocalPlayer and plr.Character then
+			if not (S.TeamCheck and plr.Team ~= nil and plr.Team == LocalPlayer.Team) then
+				local char = plr.Character
+				local hum = char:FindFirstChildOfClass("Humanoid")
+				local part = getPart(char)
+				if part and (not S.AliveCheck or (hum and hum.Health > 0)) then
+					local worldPos = part.Position
+					if S.Prediction > 0 then
+						worldPos = worldPos + part.AssemblyLinearVelocity * S.Prediction
+					end
+					local sp, onScreen = Camera:WorldToViewportPoint(worldPos)
+					if onScreen then
+						local d = (Vector2.new(sp.X, sp.Y) - center).Magnitude
+						local studs = (Camera.CFrame.Position - part.Position).Magnitude
+						if d < bestDist and studs <= S.MaxDist
+							and (not S.WallCheck or visible(part, char)) then
+							bestDist = d
+							best = worldPos
+						end
+					end
+				end
+			end
+		end
+	end
+	return best
+end
+
+local conn = RunService.RenderStepped:Connect(function()
+	Camera = Workspace.CurrentCamera
+	local vp = Camera.ViewportSize
+
+	fovFrame.Visible = S.ShowFOV
+	fovFrame.Position = UDim2.fromOffset(vp.X / 2, vp.Y / 2)
+	fovFrame.Size = UDim2.fromOffset(S.FOV * 2, S.FOV * 2)
+	fovStroke.Color = S.Enabled and Color3.fromRGB(0, 255, 140) or Color3.new(1, 1, 1)
+
+	if S.Enabled then
+		local target = getTarget()
+		if target then
+			local cf = CFrame.new(Camera.CFrame.Position, target)
+			Camera.CFrame = Camera.CFrame:Lerp(cf, S.Smooth)
+		end
+	end
+end)
+if getgenv then getgenv().__AimConn = conn end
