@@ -1,0 +1,522 @@
+--[[
+    HITBOX GUI  |  Luau - Delta Executor
+    - Nút tròn nhỏ để mở/đóng GUI (kéo được)
+    - Nút khoá 🔓/🔒 góc trên trái: khoá di chuyển GUI + nút nhỏ
+    - Theme: Dark, Rainbow, Valentine (tim bay), Lucky (cỏ 4 lá bay), Ocean, Sunset
+]]
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local UIS = game:GetService("UserInputService")
+
+local LP = Players.LocalPlayer
+local env = (getgenv and getgenv()) or _G
+
+-- chạy lại script thì dọn bản cũ
+if env.__HBX_UNLOAD then pcall(env.__HBX_UNLOAD) end
+
+------------------------------------------------------------------
+-- SETTINGS
+------------------------------------------------------------------
+local S = {
+    Enabled = false,
+    Size = 10,
+    Transparency = 0.6,
+    Part = "HumanoidRootPart",
+    Shape = "Block",
+    TeamCheck = true,
+    IgnoreFriends = false,
+    Neon = true,
+    MaxDist = 0, -- 0 = không giới hạn
+    ColorIdx = 1,
+}
+
+local PartList = { "HumanoidRootPart", "Head", "Torso", "UpperTorso" }
+local ShapeList = { "Block", "Ball" }
+local ColorOpts = {
+    { n = "Đỏ", c = Color3.fromRGB(255, 60, 60) },
+    { n = "Xanh lá", c = Color3.fromRGB(60, 255, 100) },
+    { n = "Xanh dương", c = Color3.fromRGB(60, 140, 255) },
+    { n = "Vàng", c = Color3.fromRGB(255, 220, 60) },
+    { n = "Tím", c = Color3.fromRGB(180, 80, 255) },
+    { n = "Trắng", c = Color3.fromRGB(255, 255, 255) },
+    { n = "Cầu vồng", rainbow = true, c = Color3.new(1, 1, 1) },
+}
+
+------------------------------------------------------------------
+-- THEMES
+------------------------------------------------------------------
+local Themes = {
+    Dark = {
+        bg = Color3.fromRGB(22, 22, 28), panel = Color3.fromRGB(36, 36, 46), off = Color3.fromRGB(70, 70, 85),
+        accent = Color3.fromRGB(88, 101, 242), text = Color3.fromRGB(240, 240, 245), sub = Color3.fromRGB(150, 150, 168),
+    },
+    Rainbow = {
+        bg = Color3.fromRGB(16, 16, 22), panel = Color3.fromRGB(30, 30, 40), off = Color3.fromRGB(65, 65, 80),
+        accent = Color3.fromRGB(255, 0, 0), text = Color3.fromRGB(245, 245, 250), sub = Color3.fromRGB(160, 160, 175),
+    },
+    Valentine = {
+        bg = Color3.fromRGB(58, 14, 36), panel = Color3.fromRGB(90, 26, 55), off = Color3.fromRGB(130, 60, 90),
+        accent = Color3.fromRGB(255, 90, 145), text = Color3.fromRGB(255, 236, 244), sub = Color3.fromRGB(240, 170, 200),
+        fx = "❤", fxColors = { Color3.fromRGB(255, 70, 120), Color3.fromRGB(255, 120, 160), Color3.fromRGB(255, 40, 90) },
+    },
+    Lucky = {
+        bg = Color3.fromRGB(10, 38, 22), panel = Color3.fromRGB(20, 62, 36), off = Color3.fromRGB(50, 95, 65),
+        accent = Color3.fromRGB(70, 210, 100), text = Color3.fromRGB(234, 255, 238), sub = Color3.fromRGB(150, 210, 165),
+        fx = "🍀", fxColors = { Color3.fromRGB(80, 220, 110), Color3.fromRGB(120, 240, 140) },
+    },
+    Ocean = {
+        bg = Color3.fromRGB(10, 26, 44), panel = Color3.fromRGB(20, 46, 72), off = Color3.fromRGB(50, 80, 110),
+        accent = Color3.fromRGB(40, 190, 255), text = Color3.fromRGB(232, 246, 255), sub = Color3.fromRGB(140, 180, 210),
+    },
+    Sunset = {
+        bg = Color3.fromRGB(40, 18, 30), panel = Color3.fromRGB(72, 32, 44), off = Color3.fromRGB(110, 64, 70),
+        accent = Color3.fromRGB(255, 140, 60), text = Color3.fromRGB(255, 242, 232), sub = Color3.fromRGB(225, 175, 150),
+    },
+}
+local ThemeOrder = { "Dark", "Rainbow", "Valentine", "Lucky", "Ocean", "Sunset" }
+local ThemeLabel = {
+    Dark = "🌑 Dark", Rainbow = "🌈 Rainbow", Valentine = "💖 Valentine",
+    Lucky = "🍀 Lucky", Ocean = "🌊 Ocean", Sunset = "🌇 Sunset",
+}
+
+local CurName, Cur = "Dark", Themes.Dark
+local hue = 0
+
+local function getColor(key)
+    if type(key) == "function" then return key() end
+    if key == "accent" and CurName == "Rainbow" then return Color3.fromHSV(hue, 0.75, 1) end
+    return Cur[key]
+end
+
+------------------------------------------------------------------
+-- CONNECTIONS / CLEANUP
+------------------------------------------------------------------
+local Conns = {}
+local Alive = true
+local function bind(sig, fn)
+    local c = sig:Connect(fn)
+    table.insert(Conns, c)
+    return c
+end
+
+------------------------------------------------------------------
+-- HITBOX CORE
+------------------------------------------------------------------
+local Orig = setmetatable({}, { __mode = "k" })
+local FriendCache = {}
+
+local function isFriend(p)
+    if FriendCache[p] == nil then
+        FriendCache[p] = false
+        task.spawn(function()
+            local ok, r = pcall(function() return LP:IsFriendsWith(p.UserId) end)
+            FriendCache[p] = ok and r or false
+        end)
+    end
+    return FriendCache[p]
+end
+
+local function restorePart(part)
+    local o = Orig[part]
+    if not o then return end
+    pcall(function()
+        part.Size = o.Size
+        part.Transparency = o.Transparency
+        part.CanCollide = o.CanCollide
+        part.Massless = o.Massless
+        part.Material = o.Material
+        part.Color = o.Color
+        if o.Shape then part.Shape = o.Shape end
+    end)
+    Orig[part] = nil
+end
+
+local function restoreAll()
+    for part in pairs(Orig) do restorePart(part) end
+end
+
+local function applyPart(part, col)
+    local o = Orig[part]
+    if not o then
+        o = {
+            Size = part.Size, Transparency = part.Transparency, CanCollide = part.CanCollide,
+            Massless = part.Massless, Material = part.Material, Color = part.Color,
+        }
+        pcall(function() o.Shape = part.Shape end)
+        Orig[part] = o
+    end
+    pcall(function()
+        part.Size = Vector3.new(S.Size, S.Size, S.Size)
+        part.Transparency = S.Transparency
+        part.CanCollide = false
+        part.Massless = true
+        part.Color = col
+        part.Material = S.Neon and Enum.Material.Neon or Enum.Material.Plastic
+        part.Shape = (S.Shape == "Ball") and Enum.PartType.Ball or Enum.PartType.Block
+    end)
+end
+
+bind(RunService.Heartbeat, function(dt)
+    hue = (hue + dt * 0.25) % 1
+    if not S.Enabled then return end
+
+    local opt = ColorOpts[S.ColorIdx]
+    local col = opt.rainbow and Color3.fromHSV(hue, 1, 1) or opt.c
+    local myRoot = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
+
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LP then
+            local ch = p.Character
+            local part = ch and ch:FindFirstChild(S.Part)
+            if part and part:IsA("BasePart") then
+                local hum = ch:FindFirstChildOfClass("Humanoid")
+                local skip = (not hum) or hum.Health <= 0
+                    or (S.TeamCheck and p.Team ~= nil and p.Team == LP.Team)
+                    or (S.IgnoreFriends and isFriend(p))
+                    or (S.MaxDist > 0 and myRoot and (part.Position - myRoot.Position).Magnitude > S.MaxDist)
+                if skip then restorePart(part) else applyPart(part, col) end
+            end
+        end
+    end
+end)
+
+------------------------------------------------------------------
+-- GUI HELPERS
+------------------------------------------------------------------
+local function new(class, props, kids)
+    local o = Instance.new(class)
+    for k, v in pairs(props or {}) do o[k] = v end
+    for _, k in ipairs(kids or {}) do k.Parent = o end
+    return o
+end
+local function corner(r) return new("UICorner", { CornerRadius = UDim.new(0, r) }) end
+
+local Reg = {}
+local function T(obj, prop, key)
+    local e = { obj = obj, prop = prop, key = key }
+    table.insert(Reg, e)
+    obj[prop] = getColor(key)
+    return e
+end
+
+local function refreshAll(tween)
+    for i = #Reg, 1, -1 do
+        local e = Reg[i]
+        if not e.obj or not e.obj.Parent then
+            table.remove(Reg, i)
+        else
+            local c = getColor(e.key)
+            if tween and not (CurName == "Rainbow" and e.key == "accent") then
+                TweenService:Create(e.obj, TweenInfo.new(0.35, Enum.EasingStyle.Quad), { [e.prop] = c }):Play()
+            else
+                e.obj[e.prop] = c
+            end
+        end
+    end
+end
+
+bind(RunService.RenderStepped, function()
+    if CurName == "Rainbow" then
+        for _, e in ipairs(Reg) do
+            if e.key == "accent" or type(e.key) == "function" then
+                if e.obj.Parent then e.obj[e.prop] = getColor(e.key) end
+            end
+        end
+    end
+end)
+
+local Locked = false
+
+local function draggable(handle, target)
+    local dragging, dragInput, startPos, startMouse
+    local info = { moved = false }
+    bind(handle.InputBegan, function(i)
+        if Locked then return end
+        if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            info.moved = false
+            startMouse = i.Position
+            startPos = target.Position
+            local c; c = i.Changed:Connect(function()
+                if i.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                    c:Disconnect()
+                end
+            end)
+        end
+    end)
+    bind(handle.InputChanged, function(i)
+        if i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch then
+            dragInput = i
+        end
+    end)
+    bind(UIS.InputChanged, function(i)
+        if dragging and i == dragInput and not Locked then
+            local d = i.Position - startMouse
+            if d.Magnitude > 6 then info.moved = true end
+            TweenService:Create(target, TweenInfo.new(0.06, Enum.EasingStyle.Quad), {
+                Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X, startPos.Y.Scale, startPos.Y.Offset + d.Y),
+            }):Play()
+        end
+    end)
+    return info
+end
+
+------------------------------------------------------------------
+-- ROOT GUI
+------------------------------------------------------------------
+local gui = new("ScreenGui", {
+    Name = "HBX_" .. tostring(math.random(1000, 9999)),
+    ResetOnSpawn = false,
+    ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+    DisplayOrder = 999,
+    IgnoreGuiInset = true,
+})
+do
+    local ok = pcall(function() gui.Parent = (gethui and gethui()) or game:GetService("CoreGui") end)
+    if not ok or not gui.Parent then gui.Parent = LP:WaitForChild("PlayerGui") end
+end
+
+local main = new("CanvasGroup", {
+    Name = "Main",
+    Size = UDim2.fromOffset(330, 340),
+    AnchorPoint = Vector2.new(0.5, 0.5),
+    Position = UDim2.fromScale(0.5, 0.5),
+    BorderSizePixel = 0,
+    GroupTransparency = 1,
+    Visible = false,
+    Parent = gui,
+}, { corner(14) })
+T(main, "BackgroundColor3", "bg")
+local mainStroke = new("UIStroke", { Thickness = 2, Parent = main })
+T(mainStroke, "Color", "accent")
+local scale = new("UIScale", { Scale = 0, Parent = main })
+
+-- lớp hiệu ứng (nằm dưới nội dung)
+local fxLayer = new("Frame", {
+    Name = "FX", Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1,
+    ClipsDescendants = true, ZIndex = 1, Parent = main,
+})
+local content = new("Frame", {
+    Name = "Content", Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, ZIndex = 2, Parent = main,
+})
+
+-- header
+local header = new("Frame", {
+    Size = UDim2.new(1, 0, 0, 38), BackgroundTransparency = 1, Parent = content,
+})
+local lockBtn = new("TextButton", {
+    Size = UDim2.fromOffset(28, 28), Position = UDim2.fromOffset(8, 5),
+    Text = "🔓", TextSize = 16, Font = Enum.Font.GothamBold, AutoButtonColor = false,
+    BorderSizePixel = 0, Parent = header,
+}, { corner(8) })
+T(lockBtn, "BackgroundColor3", "panel")
+T(lockBtn, "TextColor3", "text")
+
+local title = new("TextLabel", {
+    Size = UDim2.new(1, -90, 1, 0), Position = UDim2.fromOffset(45, 0), BackgroundTransparency = 1,
+    Text = "HITBOX", Font = Enum.Font.GothamBlack, TextSize = 17, Parent = header,
+})
+T(title, "TextColor3", "accent")
+
+local closeBtn = new("TextButton", {
+    Size = UDim2.fromOffset(28, 28), Position = UDim2.new(1, -36, 0, 5),
+    Text = "✕", TextSize = 14, Font = Enum.Font.GothamBold, AutoButtonColor = false,
+    BorderSizePixel = 0, Parent = header,
+}, { corner(8) })
+T(closeBtn, "BackgroundColor3", "panel")
+T(closeBtn, "TextColor3", "text")
+
+-- tabs
+local tabBar = new("Frame", {
+    Size = UDim2.new(1, -16, 0, 28), Position = UDim2.fromOffset(8, 42), BackgroundTransparency = 1, Parent = content,
+}, { new("UIListLayout", {
+    FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder,
+}) })
+
+local pages, tabBtns = {}, {}
+
+local function makePage()
+    local sf = new("ScrollingFrame", {
+        Size = UDim2.new(1, -16, 1, -80), Position = UDim2.fromOffset(8, 74),
+        BackgroundTransparency = 1, BorderSizePixel = 0, ScrollBarThickness = 3,
+        CanvasSize = UDim2.new(), AutomaticCanvasSize = Enum.AutomaticSize.Y,
+        Visible = false, Parent = content,
+    }, {
+        new("UIListLayout", { Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder }),
+        new("UIPadding", { PaddingRight = UDim.new(0, 4), PaddingBottom = UDim.new(0, 6) }),
+    })
+    sf:SetAttribute("n", 0)
+    T(sf, "ScrollBarImageColor3", "accent")
+    return sf
+end
+
+local function order(page)
+    local n = page:GetAttribute("n") + 1
+    page:SetAttribute("n", n)
+    return n
+end
+
+local function showTab(name)
+    for k, p in pairs(pages) do
+        local on = (k == name)
+        if on and not p.Visible then
+            p.Visible = true
+            p.Position = UDim2.fromOffset(8, 84)
+            TweenService:Create(p, TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+                { Position = UDim2.fromOffset(8, 74) }):Play()
+        elseif not on then
+            p.Visible = false
+        end
+        tabBtns[k].on = on
+        local b = tabBtns[k].btn
+        TweenService:Create(b, TweenInfo.new(0.2), { BackgroundTransparency = on and 0 or 0.45 }):Play()
+    end
+end
+
+local function addTab(name, label)
+    pages[name] = makePage()
+    local b = new("TextButton", {
+        Size = UDim2.new(0, 100, 1, 0), Text = label, Font = Enum.Font.GothamBold, TextSize = 13,
+        AutoButtonColor = false, BorderSizePixel = 0, BackgroundTransparency = 0.45,
+        LayoutOrder = #tabBar:GetChildren(), Parent = tabBar,
+    }, { corner(8) })
+    T(b, "BackgroundColor3", "accent")
+    T(b, "TextColor3", "text")
+    tabBtns[name] = { btn = b }
+    bind(b.Activated, function() showTab(name) end)
+    return pages[name]
+end
+
+------------------------------------------------------------------
+-- CONTROLS
+------------------------------------------------------------------
+local function row(page, h)
+    local f = new("Frame", {
+        Size = UDim2.new(1, 0, 0, h or 36), BackgroundTransparency = 0.25, BorderSizePixel = 0,
+        LayoutOrder = order(page), Parent = page,
+    }, { corner(8) })
+    T(f, "BackgroundColor3", "panel")
+    return f
+end
+
+local function label(parent, text, size, pos)
+    local l = new("TextLabel", {
+        Size = size or UDim2.new(1, -60, 1, 0), Position = pos or UDim2.fromOffset(10, 0),
+        BackgroundTransparency = 1, Text = text, Font = Enum.Font.GothamMedium, TextSize = 13,
+        TextXAlignment = Enum.TextXAlignment.Left, Parent = parent,
+    })
+    T(l, "TextColor3", "text")
+    return l
+end
+
+local function Toggle(page, text, default, cb)
+    local r = row(page)
+    label(r, text)
+    local state = default
+    local track = new("TextButton", {
+        Size = UDim2.fromOffset(42, 20), Position = UDim2.new(1, -52, 0.5, -10), Text = "",
+        AutoButtonColor = false, BorderSizePixel = 0, Parent = r,
+    }, { corner(10) })
+    T(track, "BackgroundColor3", function() return state and getColor("accent") or getColor("off") end)
+    local knob = new("Frame", {
+        Size = UDim2.fromOffset(16, 16), Position = state and UDim2.fromOffset(24, 2) or UDim2.fromOffset(2, 2),
+        BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0, Parent = track,
+    }, { corner(8) })
+    local function set(v, silent)
+        state = v
+        TweenService:Create(knob, TweenInfo.new(0.2, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+            { Position = v and UDim2.fromOffset(24, 2) or UDim2.fromOffset(2, 2) }):Play()
+        TweenService:Create(track, TweenInfo.new(0.2),
+            { BackgroundColor3 = v and getColor("accent") or getColor("off") }):Play()
+        if not silent then cb(v) end
+    end
+    bind(track.Activated, function() set(not state) end)
+    return set
+end
+
+local function Slider(page, text, min, max, default, step, cb)
+    local r = row(page, 50)
+    local lbl = label(r, text, UDim2.new(1, -70, 0, 24), UDim2.fromOffset(10, 2))
+    local val = new("TextLabel", {
+        Size = UDim2.fromOffset(60, 24), Position = UDim2.new(1, -70, 0, 2), BackgroundTransparency = 1,
+        Font = Enum.Font.GothamBold, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Right,
+        Text = tostring(default), Parent = r,
+    })
+    T(val, "TextColor3", "accent")
+    local bar = new("Frame", {
+        Size = UDim2.new(1, -24, 0, 6), Position = UDim2.new(0, 12, 0, 34), BorderSizePixel = 0, Parent = r,
+    }, { corner(3) })
+    T(bar, "BackgroundColor3", "off")
+    local fill = new("Frame", {
+        Size = UDim2.fromScale((default - min) / (max - min), 1), BorderSizePixel = 0, Parent = bar,
+    }, { corner(3) })
+    T(fill, "BackgroundColor3", "accent")
+    local knob = new("Frame", {
+        Size = UDim2.fromOffset(14, 14), AnchorPoint = Vector2.new(0.5, 0.5),
+        Position = UDim2.fromScale((default - min) / (max - min), 0.5),
+        BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0, Parent = bar,
+    }, { corner(7) })
+
+    local dragging = false
+    local function update(x)
+        local a = math.clamp((x - bar.AbsolutePosition.X) / bar.AbsoluteSize.X, 0, 1)
+        local v = min + (max - min) * a
+        v = math.floor(v / step + 0.5) * step
+        v = math.clamp(v, min, max)
+        local na = (v - min) / (max - min)
+        fill.Size = UDim2.fromScale(na, 1)
+        knob.Position = UDim2.fromScale(na, 0.5)
+        val.Text = tostring(math.floor(v * 100 + 0.5) / 100)
+        cb(v)
+    end
+    bind(bar.InputBegan, function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            page.ScrollingEnabled = false
+            update(i.Position.X)
+        end
+    end)
+    bind(UIS.InputChanged, function(i)
+        if dragging and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then
+            update(i.Position.X)
+        end
+    end)
+    bind(UIS.InputEnded, function(i)
+        if dragging and (i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch) then
+            dragging = false
+            page.ScrollingEnabled = true
+        end
+    end)
+end
+
+local function Cycle(page, text, list, idx, cb)
+    local r = row(page)
+    local b = new("TextButton", {
+        Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Font = Enum.Font.GothamMedium, TextSize = 13,
+        TextXAlignment = Enum.TextXAlignment.Left, Parent = r,
+    }, { new("UIPadding", { PaddingLeft = UDim.new(0, 10) }) })
+    T(b, "TextColor3", "text")
+    local function render()
+        local v = list[idx]
+        b.Text = text .. ":  " .. ((type(v) == "table") and v.n or tostring(v)) .. "  ▸"
+    end
+    render()
+    bind(b.Activated, function()
+        idx = idx % #list + 1
+        render()
+        cb(idx, list[idx])
+    end)
+end
+
+local function Button(page, text, cb)
+    local r = row(page)
+    local b = new("TextButton", {
+        Size = UDim2.fromScale(1, 1), BackgroundTransparency = 0.1, Text = text, Font = Enum.Font.GothamBold,
+        TextSize = 13, AutoButtonColor = false, BorderSizePixel = 0, Parent = r,
+    }, { corner(8) })
+    T(b, "BackgroundColor3", "accent")
+    T(b, "TextColor3", "text")
+    bind(b.MouseEnter, function() Twe
