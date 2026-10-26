@@ -1,0 +1,546 @@
+local Players,RS,UIS,WS=game:GetService("Players"),game:GetService("RunService"),game:GetService("UserInputService"),game:GetService("Workspace")
+local lp,cam=Players.LocalPlayer,WS.CurrentCamera
+
+local CFG={
+	Keywords={"rocket","missile","bazooka","launcher","firework","bomb","tnt"},
+	HoverHeight=8,HoverRadius=6,PerRing=10,Speed=250,FlyTime=5,
+	CarpetRadius=40,SpinSpeed=0.8,Stagger=0.08,DroneSpeed=70,LookSens=0.004,
+	RocketOffset=CFrame.Angles(0,0,0),
+	PadLeftX=0.16,PadRightX=0.84,
+}
+
+if getgenv and getgenv().__FTAP_CLEAN then pcall(getgenv().__FTAP_CLEAN) end
+local conns={}
+local function track(c) conns[#conns+1]=c return c end
+
+local function newGui(name,order)
+	local g=Instance.new("ScreenGui")
+	g.Name=name g.ResetOnSpawn=false g.IgnoreGuiInset=true g.DisplayOrder=order
+	g.ZIndexBehavior=Enum.ZIndexBehavior.Sibling
+	pcall(function() g.ScreenInsets=Enum.ScreenInsets.None end)
+	local ok,p=pcall(function() return (gethui and gethui()) or game:GetService("CoreGui") end)
+	p=ok and p or lp:WaitForChild("PlayerGui")
+	pcall(function() local o=p:FindFirstChild(name) if o then o:Destroy() end end)
+	if not pcall(function() g.Parent=p end) then g.Parent=lp:WaitForChild("PlayerGui") end
+	return g
+end
+
+local gui,droneGui=newGui("FTAP_Rocket",999),newGui("FTAP_Drone",1000)
+droneGui.Enabled=false
+
+local statusLabel
+local function status(t) if statusLabel then statusLabel.Text=t end end
+
+local selected,allToys,hovered={}, {}, {}
+local HUGE=Vector3.new(1e9,1e9,1e9)
+
+local function getHRP() local c=lp.Character return c and c:FindFirstChild("HumanoidRootPart") end
+
+local function match(n)
+	n=n:lower()
+	for _,k in ipairs(CFG.Keywords) do if n:find(k,1,true) then return true end end
+	return false
+end
+
+local function mainPart(m)
+	if m:IsA("BasePart") then return m end
+	if not m:IsA("Model") then return end
+	if m.PrimaryPart then return m.PrimaryPart end
+	local best,bv=nil,-1
+	for _,d in ipairs(m:GetDescendants()) do
+		if d:IsA("BasePart") then
+			local v=d.Size.X*d.Size.Y*d.Size.Z
+			if v>bv then best,bv=d,v end
+		end
+	end
+	return best
+end
+
+local function toyFolders()
+	local r={}
+	for _,c in ipairs(WS:GetChildren()) do
+		if (c:IsA("Folder") or c:IsA("Model")) and c.Name:find(lp.Name,1,true) and c.Name:lower():find("toy") then r[#r+1]=c end
+	end
+	return r
+end
+
+local function scan()
+	allToys={}
+	local folders=toyFolders()
+	for _,f in ipairs(folders) do
+		for _,m in ipairs(f:GetChildren()) do
+			local p=mainPart(m)
+			if p then allToys[#allToys+1]={part=p,name=m.Name} end
+		end
+	end
+	if #folders==0 then
+		for _,d in ipairs(WS:GetDescendants()) do
+			if (d:IsA("Model") or d:IsA("BasePart")) and match(d.Name) and not Players:GetPlayerFromCharacter(d)
+				and (d.Parent==WS or not match(d.Parent.Name)) then
+				local p=mainPart(d)
+				if p and not p.Anchored then allToys[#allToys+1]={part=p,name=d.Name} end
+			end
+		end
+	end
+	for _,t in ipairs(allToys) do
+		if selected[t.name]==nil and match(t.name) then selected[t.name]=true end
+	end
+	return #allToys
+end
+
+local function charOf(p)
+	local m=p:FindFirstAncestorOfClass("Model")
+	while m do
+		if m:FindFirstChildOfClass("Humanoid") then return m end
+		m=m.Parent and m.Parent:FindFirstAncestorOfClass("Model")
+	end
+end
+
+local function heldParts()
+	local res,seen={}, {}
+	local function push(p,c)
+		if p and p:IsA("BasePart") and not p.Anchored and not seen[p] and not (c and p:IsDescendantOf(c))
+			and not (lp.Character and p:IsDescendantOf(lp.Character)) then
+			seen[p]=true res[#res+1]=p
+		end
+	end
+	for _,c in ipairs(WS:GetChildren()) do
+		if (c:IsA("Model") or c:IsA("Folder") or c:IsA("BasePart")) and c.Name:lower():find("grab") then
+			for _,d in ipairs(c:GetDescendants()) do
+				if d:IsA("WeldConstraint") or d:IsA("Weld") then
+					push(d.Part0,c) push(d.Part1,c)
+				elseif d:IsA("Beam") or d:IsA("AlignPosition") or d:IsA("AlignOrientation") or d:IsA("RigidConstraint")
+					or d:IsA("BallSocketConstraint") or d:IsA("RopeConstraint") then
+					push(d.Attachment0 and d.Attachment0.Parent,c) push(d.Attachment1 and d.Attachment1.Parent,c)
+				end
+			end
+		end
+	end
+	if #res==0 then
+		for _,d in ipairs(WS:GetDescendants()) do
+			if d:IsA("Beam") then
+				local a,b=d.Attachment0 and d.Attachment0.Parent,d.Attachment1 and d.Attachment1.Parent
+				if a and b and a:IsA("BasePart") and b:IsA("BasePart") then
+					local ca,cb=charOf(a),charOf(b)
+					if ca and not cb then push(b) elseif cb and not ca then push(a) end
+				end
+			end
+		end
+	end
+	return res
+end
+
+local rayParams=RaycastParams.new()
+rayParams.FilterType=Enum.RaycastFilterType.Exclude
+local function getAim()
+	cam=WS.CurrentCamera
+	local ex={}
+	if lp.Character then ex[1]=lp.Character end
+	for _,f in ipairs(toyFolders()) do ex[#ex+1]=f end
+	rayParams.FilterDescendantsInstances=ex
+	local ray=cam:ViewportPointToRay(cam.ViewportSize.X/2,cam.ViewportSize.Y/2)
+	local res=WS:Raycast(ray.Origin,ray.Direction*3000,rayParams)
+	return res and res.Position or (ray.Origin+ray.Direction*600),ray.Direction.Unit
+end
+
+local function newGyro(part)
+	local g=Instance.new("BodyGyro")
+	g.MaxTorque=HUGE g.P=1e5 g.D=1e3 g.CFrame=part.CFrame g.Parent=part
+	return g
+end
+
+local function clearBody(e)
+	if e.bp then e.bp:Destroy() e.bp=nil end
+	if e.bg then e.bg:Destroy() e.bg=nil end
+end
+
+local function addHover(part)
+	if not part or not part.Parent or part.Anchored then return false end
+	for _,h in ipairs(hovered) do if h.part==part then return false end end
+	local bp=Instance.new("BodyPosition")
+	bp.MaxForce=HUGE bp.P=1e5 bp.D=1e3 bp.Position=part.Position bp.Parent=part
+	hovered[#hovered+1]={part=part,bp=bp,bg=newGyro(part)}
+	return true
+end
+
+local function hoverAll()
+	scan()
+	local added=0
+	for _,r in ipairs(allToys) do
+		if selected[r.name] and addHover(r.part) then added+=1 end
+	end
+	status(#hovered==0 and "Chưa chọn toy nào." or ("Đang treo: "..#hovered.." (+"..added..")"))
+end
+
+local function hoverHeld()
+	local added=0
+	for _,p in ipairs(heldParts()) do if addHover(p) then added+=1 end end
+	status(added>0 and ("Treo vật đang cầm: +"..added.." (tổng "..#hovered..")") or "Không thấy vật nào đang bị cầm")
+end
+
+local function releaseAll()
+	for _,e in ipairs(hovered) do clearBody(e) end
+	hovered={}
+	status("Đã thả")
+end
+
+local spin=0
+track(RS.Heartbeat:Connect(function(dt)
+	local hrp,n=getHRP(),#hovered
+	if not hrp or n==0 then return end
+	spin+=dt*CFG.SpinSpeed
+	local aimDir=WS.CurrentCamera.CFrame.LookVector
+	for i=n,1,-1 do
+		local e=hovered[i]
+		if not e.part.Parent then
+			table.remove(hovered,i)
+		else
+			local ring=(i-1)//CFG.PerRing
+			local cnt=math.min(CFG.PerRing,n-ring*CFG.PerRing)
+			local ang=spin+((i-1)%CFG.PerRing/cnt)*math.pi*2
+			local rad=CFG.HoverRadius+ring*2
+			local pos=hrp.Position+Vector3.new(math.cos(ang)*rad,CFG.HoverHeight+ring*3,math.sin(ang)*rad)
+			if e.bp then e.bp.Position=pos end
+			if e.bg then e.bg.CFrame=CFrame.lookAt(pos,pos+aimDir)*CFG.RocketOffset end
+		end
+	end
+end))
+
+local function launch(e,mode,aimPos,aimDir)
+	local part=e.part
+	if not part.Parent then return end
+	if e.bp then e.bp:Destroy() e.bp=nil end
+	e.bg=e.bg or newGyro(part)
+	local bv=Instance.new("BodyVelocity")
+	bv.MaxForce=HUGE bv.P=1e5 bv.Velocity=aimDir*CFG.Speed bv.Parent=part
+	local target
+	if mode=="carpet" then
+		local a,r=math.random()*math.pi*2,math.sqrt(math.random())*CFG.CarpetRadius
+		target=aimPos+Vector3.new(math.cos(a)*r,0,math.sin(a)*r)
+	end
+	local t0,c=os.clock()
+	c=RS.Heartbeat:Connect(function()
+		local done=(not part.Parent) or os.clock()-t0>CFG.FlyTime
+		local dir=aimDir
+		if not done and target then
+			local d=target-part.Position
+			if d.Magnitude<4 then done=true else dir=d.Unit end
+		end
+		if done then c:Disconnect() bv:Destroy() clearBody(e) return end
+		bv.Velocity=dir*CFG.Speed
+		if e.bg then e.bg.CFrame=CFrame.lookAt(part.Position,part.Position+dir)*CFG.RocketOffset end
+	end)
+end
+
+local function fire(mode)
+	if #hovered==0 then status("Chưa treo gì cả") return end
+	local aimPos,aimDir=getAim()
+	local list=hovered
+	hovered={}
+	for i,e in ipairs(list) do
+		task.delay((i-1)*CFG.Stagger,function() launch(e,mode,aimPos,aimDir) end)
+	end
+	status((mode=="carpet" and "Bao trùm: " or "Khai hoả: ")..#list)
+end
+
+local drone={on=false,pos=Vector3.zero,yaw=0,pitch=0}
+local held={W=false,A=false,S=false,D=false,Up=false,Down=false}
+local controls
+pcall(function() controls=require(lp:WaitForChild("PlayerScripts"):WaitForChild("PlayerModule")):GetControls() end)
+
+local function setDrone(on)
+	if on==drone.on then return end
+	drone.on=on
+	droneGui.Enabled=on
+	pcall(function()
+		cam=WS.CurrentCamera
+		if on then
+			drone.pos=cam.CFrame.Position
+			drone.pitch,drone.yaw=cam.CFrame:ToOrientation()
+			cam.CameraType=Enum.CameraType.Scriptable
+			if controls then controls:Disable() end
+		else
+			cam.CameraType=Enum.CameraType.Custom
+			local h=lp.Character and lp.Character:FindFirstChildOfClass("Humanoid")
+			if h then cam.CameraSubject=h end
+			if controls then controls:Enable() end
+			for k in pairs(held) do held[k]=false end
+			UIS.MouseBehavior=Enum.MouseBehavior.Default
+		end
+	end)
+	status(on and "Drone BẬT: W/A/S/D + kéo màn hình để xoay" or "Drone: TẮT")
+end
+
+RS:BindToRenderStep("FTAP_Drone",Enum.RenderPriority.Camera.Value+5,function(dt)
+	if not drone.on then return end
+	cam=WS.CurrentCamera
+	cam.CameraType=Enum.CameraType.Scriptable
+	local typing=UIS:GetFocusedTextBox()~=nil
+	local function k(c,h) return (h or (not typing and UIS:IsKeyDown(c))) and 1 or 0 end
+	local fwd=k(Enum.KeyCode.W,held.W)-k(Enum.KeyCode.S,held.S)
+	local right=k(Enum.KeyCode.D,held.D)-k(Enum.KeyCode.A,held.A)
+	local up=k(Enum.KeyCode.E,held.Up)-k(Enum.KeyCode.Q,held.Down)
+	local rot=CFrame.fromOrientation(drone.pitch,drone.yaw,0)
+	drone.pos+=(rot.LookVector*fwd+rot.RightVector*right+Vector3.yAxis*up)*CFG.DroneSpeed*dt
+	cam.CFrame=CFrame.new(drone.pos)*rot
+end)
+
+local rmb,lookTouch=false,nil
+local UT=Enum.UserInputType
+track(UIS.InputBegan:Connect(function(i,gp)
+	if not drone.on then return end
+	if i.UserInputType==UT.MouseButton2 then
+		rmb=true UIS.MouseBehavior=Enum.MouseBehavior.LockCurrentPosition
+	elseif i.UserInputType==UT.Touch and not gp and not lookTouch then
+		lookTouch=i
+	end
+end))
+track(UIS.InputEnded:Connect(function(i)
+	if i.UserInputType==UT.MouseButton2 then
+		rmb=false UIS.MouseBehavior=Enum.MouseBehavior.Default
+	elseif i==lookTouch then
+		lookTouch=nil
+	end
+end))
+track(UIS.InputChanged:Connect(function(i)
+	if drone.on and ((i.UserInputType==UT.MouseMovement and rmb) or i==lookTouch) then
+		drone.yaw-=i.Delta.X*CFG.LookSens
+		drone.pitch=math.clamp(drone.pitch-i.Delta.Y*CFG.LookSens,-math.rad(89),math.rad(89))
+	end
+end))
+
+local C=Color3.fromRGB
+local BG,BTN,ACC,ORG=C(24,24,30),C(45,45,58),C(220,70,60),C(200,110,40)
+local GREEN,PURPLE,BLUE,PADBTN=C(60,130,70),C(70,70,120),C(60,100,190),C(70,70,90)
+local locked=false
+
+local function corner(o,r) local c=Instance.new("UICorner") c.CornerRadius=UDim.new(0,r or 10) c.Parent=o end
+
+local function mkBtn(parent,text,size,pos,color)
+	local b=Instance.new("TextButton")
+	b.Size=size b.BackgroundColor3=color or BTN b.TextColor3=Color3.new(1,1,1)
+	b.Font=Enum.Font.GothamBold b.TextSize=14 b.TextWrapped=true b.Text=text
+	if pos then b.Position=pos end
+	b.Parent=parent corner(b)
+	return b
+end
+
+local function mkLabel(parent,size,pos,text,ts,color)
+	local l=Instance.new("TextLabel")
+	l.Size=size l.BackgroundTransparency=1 l.Text=text l.TextSize=ts
+	l.TextColor3=color or Color3.new(1,1,1) l.Font=Enum.Font.Gotham
+	if pos then l.Position=pos end
+	l.Parent=parent
+	return l
+end
+
+local function makeDraggable(obj,handle,onTap)
+	local drag,startPos,startVec,moved
+	handle.Active=true
+	handle.InputBegan:Connect(function(i)
+		local t=i.UserInputType
+		if (t==UT.MouseButton1 or t==UT.Touch) and not drag then
+			drag,startPos,startVec,moved=i,obj.Position,i.Position,0
+			i.Changed:Connect(function()
+				if i.UserInputState==Enum.UserInputState.End and drag==i then
+					drag=nil
+					if moved<8 and onTap then onTap() end
+				end
+			end)
+		end
+	end)
+	track(UIS.InputChanged:Connect(function(i)
+		if not drag then return end
+		if i==drag or (drag.UserInputType==UT.MouseButton1 and i.UserInputType==UT.MouseMovement) then
+			local d=i.Position-startVec
+			moved=math.max(moved,Vector2.new(d.X,d.Y).Magnitude)
+			if locked then return end
+			obj.Position=UDim2.new(startPos.X.Scale,startPos.X.Offset+d.X,startPos.Y.Scale,startPos.Y.Offset+d.Y)
+		end
+	end))
+end
+
+local toggle=mkBtn(gui,"🚀",UDim2.fromOffset(54,54),UDim2.fromOffset(8,46),PURPLE)
+toggle.TextSize=28 toggle.AutoButtonColor=false
+
+local main=Instance.new("Frame")
+main.Size=UDim2.fromOffset(268,0) main.AutomaticSize=Enum.AutomaticSize.Y
+main.Position=UDim2.fromOffset(70,46) main.BackgroundColor3=BG main.BackgroundTransparency=0.06
+main.Parent=gui corner(main,14)
+
+local pad=Instance.new("UIPadding")
+pad.PaddingTop,pad.PaddingBottom,pad.PaddingLeft,pad.PaddingRight=UDim.new(0,8),UDim.new(0,10),UDim.new(0,10),UDim.new(0,10)
+pad.Parent=main
+local lay=Instance.new("UIListLayout")
+lay.Padding=UDim.new(0,8) lay.SortOrder=Enum.SortOrder.LayoutOrder lay.Parent=main
+
+local head=Instance.new("Frame")
+head.Size=UDim2.new(1,0,0,38) head.BackgroundTransparency=1 head.LayoutOrder=0 head.Parent=main
+
+local lockBtn=mkBtn(head,"🔓",UDim2.fromOffset(42,38),nil,GREEN)
+lockBtn.TextSize=20
+lockBtn.MouseButton1Click:Connect(function()
+	locked=not locked
+	lockBtn.Text=locked and "🔒" or "🔓"
+	lockBtn.BackgroundColor3=locked and ACC or GREEN
+	toggle.BackgroundColor3=locked and C(110,60,60) or PURPLE
+	status(locked and "Đã khoá GUI + nút nhỏ" or "Đã mở khoá")
+end)
+
+local title=mkLabel(head,UDim2.new(1,-50,1,0),UDim2.fromOffset(50,0),"🚀 Rocket Hub (kéo ở đây)",14)
+title.Font=Enum.Font.GothamBold
+makeDraggable(main,title)
+makeDraggable(toggle,toggle,function() main.Visible=not main.Visible end)
+
+local order=0
+local function nextOrder() order+=1 return order end
+
+local function mkRow(n,h)
+	local r=Instance.new("Frame")
+	r.Size=UDim2.new(1,0,0,h or 44) r.BackgroundTransparency=1 r.LayoutOrder=nextOrder() r.Parent=main
+	if n>0 then
+		local g=Instance.new("UIGridLayout")
+		g.FillDirection=Enum.FillDirection.Horizontal
+		g.CellPadding=UDim2.fromOffset(8,0)
+		g.CellSize=UDim2.new(1/n,-8*(n-1)/n,1,0)
+		g.SortOrder=Enum.SortOrder.LayoutOrder
+		g.Parent=r
+	end
+	return r
+end
+local function cell(row,text,color) return mkBtn(row,text,UDim2.new(),nil,color) end
+
+local r1=mkRow(2)
+local bScan,bAll=cell(r1,"🔎 Quét toy"),cell(r1,"✔ Chọn tất cả")
+
+local listFrame=Instance.new("ScrollingFrame")
+listFrame.Size=UDim2.new(1,0,0,120) listFrame.BackgroundColor3=C(16,16,20)
+listFrame.BorderSizePixel=0 listFrame.ScrollBarThickness=5
+listFrame.AutomaticCanvasSize=Enum.AutomaticSize.Y listFrame.CanvasSize=UDim2.new()
+listFrame.LayoutOrder=nextOrder() listFrame.Parent=main corner(listFrame,8)
+local lpad=Instance.new("UIPadding")
+lpad.PaddingTop,lpad.PaddingLeft,lpad.PaddingRight,lpad.PaddingBottom=UDim.new(0,4),UDim.new(0,4),UDim.new(0,4),UDim.new(0,4)
+lpad.Parent=listFrame
+local ll=Instance.new("UIListLayout") ll.Padding=UDim.new(0,4) ll.Parent=listFrame
+
+local function refreshList()
+	for _,c in ipairs(listFrame:GetChildren()) do if c:IsA("TextButton") then c:Destroy() end end
+	local counts,ord={}, {}
+	for _,t in ipairs(allToys) do
+		counts[t.name]=(counts[t.name] or 0)+1
+		if counts[t.name]==1 then ord[#ord+1]=t.name end
+	end
+	table.sort(ord)
+	for _,n in ipairs(ord) do
+		local b=mkBtn(listFrame,"",UDim2.new(1,-8,0,32))
+		b.TextSize=13 b.TextXAlignment=Enum.TextXAlignment.Left
+		local function upd() b.Text=(selected[n] and " ✅ " or " ⬜ ")..n.."  ×"..counts[n] end
+		upd()
+		b.MouseButton1Click:Connect(function() selected[n]=not selected[n] upd() end)
+	end
+	if #ord==0 then status("Không thấy toy. Spawn toy rồi Quét lại.") end
+end
+
+local r2=mkRow(2)
+local bHover,bHeld=cell(r2,"☁️ Treo toy đã chọn"),cell(r2,"🤏 Treo vật đang cầm",C(120,80,170))
+local r3=mkRow(2)
+local bAuto,bFree=cell(r3,"🔁 Tự treo vật cầm: TẮT"),cell(r3,"⬇️ Thả tất cả")
+local r4=mkRow(2)
+local bFire,bCarp=cell(r4,"🔥 Khai hoả 1 hướng",ACC),cell(r4,"💥 Khai hoả bao trùm",ORG)
+local bDrone=cell(mkRow(1),"🛸 Drone: TẮT",BLUE)
+
+local function stepper(getText,dec,inc)
+	local r=mkRow(0,40)
+	local m=mkBtn(r,"−",UDim2.new(0,64,1,0))
+	local p=mkBtn(r,"+",UDim2.new(0,64,1,0),UDim2.new(1,-64,0,0))
+	local l=mkLabel(r,UDim2.new(1,-144,1,0),UDim2.new(0,72,0,0),"",14)
+	local function upd() l.Text=getText() end
+	upd()
+	m.MouseButton1Click:Connect(function() dec() upd() end)
+	p.MouseButton1Click:Connect(function() inc() upd() end)
+end
+stepper(function() return "Bán kính: "..CFG.CarpetRadius end,
+	function() CFG.CarpetRadius=math.max(5,CFG.CarpetRadius-5) end,
+	function() CFG.CarpetRadius=math.min(200,CFG.CarpetRadius+5) end)
+local function setSpin(v) CFG.SpinSpeed=math.floor(math.clamp(v,0,10)*10+0.5)/10 end
+stepper(function() return "Tốc độ quay: "..CFG.SpinSpeed end,
+	function() setSpin(CFG.SpinSpeed-0.4) end,
+	function() setSpin(CFG.SpinSpeed+0.4) end)
+
+statusLabel=mkLabel(main,UDim2.new(1,0,0,34),nil,"Spawn toy rồi bấm Quét",12,C(180,180,190))
+statusLabel.TextWrapped=true statusLabel.LayoutOrder=nextOrder()
+
+local crosshair=Instance.new("Frame")
+crosshair.Size=UDim2.fromOffset(10,10) crosshair.AnchorPoint=Vector2.new(0.5,0.5)
+crosshair.Position=UDim2.fromScale(0.5,0.5) crosshair.BackgroundTransparency=1
+crosshair.Parent=droneGui corner(crosshair,10)
+do local s=Instance.new("UIStroke") s.Color=C(255,60,60) s.Thickness=2 s.Parent=crosshair end
+
+local function mkPad(w,anchor,x)
+	local f=Instance.new("Frame")
+	f.Size=UDim2.fromOffset(w,142) f.AnchorPoint=anchor f.Position=UDim2.new(x,0,1,-28)
+	f.BackgroundColor3=C(10,10,14) f.BackgroundTransparency=0.45
+	f.Parent=droneGui corner(f,14)
+	return f
+end
+local dronePad=mkPad(222,Vector2.new(0,1),CFG.PadLeftX)
+local firePad=mkPad(156,Vector2.new(1,1),CFG.PadRightX)
+
+local function isPress(i) return i.UserInputType==UT.MouseButton1 or i.UserInputType==UT.Touch end
+local function holdBtn(text,x,y,key)
+	local b=mkBtn(dronePad,text,UDim2.fromOffset(66,60),UDim2.fromOffset(x,y),PADBTN)
+	b.TextSize=22 b.AutoButtonColor=false
+	b.InputBegan:Connect(function(i) if isPress(i) then held[key]=true b.BackgroundColor3=ACC end end)
+	b.InputEnded:Connect(function(i) if isPress(i) then held[key]=false b.BackgroundColor3=PADBTN end end)
+end
+holdBtn("▼",7,7,"Down") holdBtn("W",78,7,"W") holdBtn("▲",149,7,"Up")
+holdBtn("A",7,75,"A") holdBtn("S",78,75,"S") holdBtn("D",149,75,"D")
+
+local qFire=mkBtn(firePad,"🔥 1 hướng",UDim2.new(1,-14,0,60),UDim2.fromOffset(7,7),ACC)
+local qCarp=mkBtn(firePad,"💥 Bao trùm",UDim2.new(1,-14,0,60),UDim2.fromOffset(7,75),ORG)
+
+local auto=false
+bScan.MouseButton1Click:Connect(function()
+	local n=scan() refreshList()
+	local sel=0
+	for _,t in ipairs(allToys) do if selected[t.name] then sel+=1 end end
+	if n>0 then status("Thấy "..n.." toy, chọn "..sel) end
+end)
+bAll.MouseButton1Click:Connect(function()
+	scan()
+	for _,t in ipairs(allToys) do selected[t.name]=true end
+	refreshList() status("Đã chọn tất cả")
+end)
+bHover.MouseButton1Click:Connect(hoverAll)
+bHeld.MouseButton1Click:Connect(hoverHeld)
+bFree.MouseButton1Click:Connect(releaseAll)
+bAuto.MouseButton1Click:Connect(function()
+	auto=not auto
+	bAuto.Text="🔁 Tự treo vật cầm: "..(auto and "BẬT" or "TẮT")
+	bAuto.BackgroundColor3=auto and GREEN or BTN
+	if auto then
+		task.spawn(function()
+			while auto and gui.Parent do
+				for _,p in ipairs(heldParts()) do addHover(p) end
+				task.wait(0.5)
+			end
+		end)
+	end
+end)
+for _,p in ipairs({{bFire,"direct"},{qFire,"direct"},{bCarp,"carpet"},{qCarp,"carpet"}}) do
+	p[1].MouseButton1Click:Connect(function() fire(p[2]) end)
+end
+bDrone.MouseButton1Click:Connect(function()
+	setDrone(not drone.on)
+	bDrone.Text=drone.on and "🛸 Drone: BẬT" or "🛸 Drone: TẮT"
+end)
+
+task.defer(function() scan() refreshList() end)
+
+if getgenv then
+	getgenv().__FTAP_CLEAN=function()
+		auto=false
+		setDrone(false) releaseAll()
+		pcall(function() RS:UnbindFromRenderStep("FTAP_Drone") end)
+		for _,c in ipairs(conns) do pcall(function() c:Disconnect() end) end
+		pcall(function() gui:Destroy() en
