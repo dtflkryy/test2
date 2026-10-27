@@ -1,0 +1,543 @@
+--[[
+    AE Hub | Classic Animation Packs + Roblox Emotes
+    Executor: Delta X (Mobile / PC)
+    Chỉ chạy phía client. Yêu cầu: nhân vật R15.
+]]
+
+local Players = game:GetService("Players")
+local UIS = game:GetService("UserInputService")
+local HttpService = game:GetService("HttpService")
+local lp = Players.LocalPlayer
+
+-- Dọn bản cũ nếu chạy lại script
+pcall(function()
+	for _, p in ipairs({ (gethui and gethui()) or game:GetService("CoreGui"), lp:WaitForChild("PlayerGui") }) do
+		local old = p:FindFirstChild("AnimHubGui")
+		if old then old:Destroy() end
+	end
+end)
+
+----------------------------------------------------------------
+-- DỮ LIỆU
+----------------------------------------------------------------
+local function P(name, idle1, idle2, walk, run, jump, climb, fall, swim, swimidle)
+	return { name = name, idle1 = idle1, idle2 = idle2, walk = walk, run = run,
+		jump = jump, climb = climb, fall = fall, swim = swim, swimidle = swimidle }
+end
+
+local PACKS = {
+	P("Mặc định Roblox", 507766666, 507766951, 507777826, 507767714, 507765000, 507765644, 507767968, 507784897, 507785072),
+	P("Astronaut", 891621366, 891633237, 891667138, 891636393, 891627522, 891609353, 891617961),
+	P("Bubbly", 910004836, 910009958, 910034870, 910025107, 910016857, 909997997, 910001910, 910028158, 910030921),
+	P("Cartoony", 742637544, 742638445, 742640026, 742638842, 742637942, 742636889, 742637151),
+	P("Elder", 845397899, 845400520, 845403856, 845386501, 845398858, 845392038, 845396048),
+	P("Knight", 657595757, 657568135, 657552124, 657564596, 658409194, 658360781, 657600338),
+	P("Levitation", 616006778, 616008087, 616013216, 616010382, 616008936, 616003713, 616005863, 616011509, 616012453),
+	P("Mage", 707742142, 707855907, 707897309, 707861613, 707853694, 707826056, 707829716),
+	P("Ninja", 656117400, 656118341, 656121766, 656118852, 656117878, 656114359, 656115606),
+	P("Old School", 5319828216, 5319831086, 5319847204, 5319844329, 5319841935, 5319816685, 5319839762),
+	P("Patrol", 1149612882, 1150842221, 1151231493, 1150967949, 1150944216, 1148811837, 1148863382),
+	P("Pirate", 750781874, 750782770, 750785693, 750783738, 750782230, 750779899, 750780242),
+	P("Popstar", 1212900985, 1150842221, 1212980338, 1212980348, 1212954642, 1213044953, 1212900995),
+	P("Robot", 616088211, 616089559, 616095330, 616091570, 616090535, 616086039, 616087089),
+	P("Stylish", 616136790, 616138447, 616146177, 616140816, 616139451, 616133594, 616134815),
+	P("Superhero", 616111295, 616113536, 616122287, 616117076, 616115533, 616104706, 616108001),
+	P("Toy", 782841498, 782845736, 782843345, 782842708, 782847020, 782843869, 782846423),
+	P("Vampire", 1083445855, 1083450166, 1083473930, 1083462077, 1083455352, 1083439238, 1083443587),
+	P("Werewolf", 1083195517, 1083214717, 1083178339, 1083216690, 1083218792, 1083182000, 1083189019),
+	P("Zombie", 616158929, 616160636, 616168032, 616163682, 616161997, 616156119, 616157476),
+}
+
+-- Emote do Roblox tạo (R15)
+local EMOTES = {
+	{ "Wave", 507770239 },
+	{ "Point", 507770453 },
+	{ "Cheer", 507770677 },
+	{ "Laugh", 507770818 },
+	{ "Dance 1", 507771019 },
+	{ "Dance 2", 507776043 },
+	{ "Dance 3", 507777268 },
+	{ "Air Guitar", 3695300085 },
+	{ "Applaud", 5915779043 },
+	{ "Bored", 5230599566 },
+	{ "Break Dance", 5915648917 },
+	{ "Bunny Hop", 4641985101 },
+	{ "Confused", 4940561610 },
+	{ "Curtsy", 4555816777 },
+	{ "Dizzy", 3361426436 },
+	{ "Dolphin Dance", 5938365243 },
+	{ "Dorky Dance", 4212455378 },
+	{ "Fashionable", 3333331310 },
+	{ "Fishing", 3334832150 },
+	{ "Floss", 5917459365 },
+	{ "Godlike", 3337994105 },
+	{ "Haha", 3337966527 },
+	{ "Happy", 4841405708 },
+	{ "Hello", 3576686446 },
+	{ "Hero Landing", 5104344710 },
+	{ "Hype Dance", 3695333486 },
+	{ "Idol", 4101966434 },
+	{ "Jumping Wave", 4940564896 },
+	{ "Line Dance", 4049037604 },
+	{ "Power Blast", 4841397952 },
+	{ "Rodeo Dance", 5918726674 },
+	{ "Salute", 3333474484 },
+	{ "Shrug", 3576968026 },
+	{ "Shy", 3337978742 },
+	{ "Side to Side", 3333136415 },
+	{ "Sleepy", 4689362868 },
+	{ "Sneaky", 3334392772 },
+	{ "Stadium", 3338055167 },
+	{ "Superhero Reveal", 3696763549 },
+	{ "Tantrum", 5104341999 },
+	{ "Tilt", 3360692915 },
+	{ "Top Rock", 3361276673 },
+}
+
+local function url(id) return "rbxassetid://" .. tostring(id) end
+
+-- Các slot trong script Animate
+local SLOTS = {
+	{ "idle", "Animation1", "idle1" },
+	{ "idle", "Animation2", "idle2" },
+	{ "walk", "WalkAnim", "walk" },
+	{ "run", "RunAnim", "run" },
+	{ "jump", "JumpAnim", "jump" },
+	{ "climb", "ClimbAnim", "climb" },
+	{ "fall", "FallAnim", "fall" },
+	{ "swim", "Swim", "swim" },
+	{ "swimidle", "SwimIdle", "swimidle" },
+}
+
+----------------------------------------------------------------
+-- LOGIC
+----------------------------------------------------------------
+local statusLabel
+local function setStatus(t, ok)
+	if statusLabel then
+		statusLabel.Text = t
+		statusLabel.TextColor3 = ok and Color3.fromRGB(110, 220, 140) or Color3.fromRGB(240, 120, 120)
+	end
+end
+
+local function getChar()
+	local c = lp.Character
+	local h = c and c:FindFirstChildOfClass("Humanoid")
+	return c, h
+end
+
+local currentPack = nil
+local emoteTrack, emoteConn
+local originalIds = nil -- animation gốc của người chơi (lưu khi spawn)
+
+local function snapshotOriginal(char)
+	local animate = char and char:FindFirstChild("Animate")
+	if not animate then return end
+	local snap = {}
+	for _, s in ipairs(SLOTS) do
+		local f = animate:FindFirstChild(s[1])
+		local a = f and f:FindFirstChild(s[2])
+		if a then snap[s[3]] = a.AnimationId end
+	end
+	originalIds = snap
+end
+
+local function refreshAnimate(hum, animate)
+	animate.Disabled = true
+	local animator = hum:FindFirstChildOfClass("Animator")
+	if animator then
+		for _, t in ipairs(animator:GetPlayingAnimationTracks()) do t:Stop() end
+	end
+	animate.Disabled = false
+end
+
+local function applyPack(pack, silent)
+	local char, hum = getChar()
+	local animate = char and char:FindFirstChild("Animate")
+	if not (hum and animate) then
+		setStatus("Không tìm thấy nhân vật / Animate", false)
+		return
+	end
+	if not originalIds then snapshotOriginal(char) end
+	for _, s in ipairs(SLOTS) do
+		local id = pack[s[3]]
+		if id then
+			local f = animate:FindFirstChild(s[1])
+			local a = f and f:FindFirstChild(s[2])
+			if a then a.AnimationId = url(id) end
+		end
+	end
+	refreshAnimate(hum, animate)
+	currentPack = pack
+	if not silent then setStatus("Đã áp dụng: " .. pack.name, true) end
+end
+
+local function resetToOriginal()
+	local char, hum = getChar()
+	local animate = char and char:FindFirstChild("Animate")
+	if not (hum and animate) then
+		return setStatus("Không tìm thấy nhân vật / Animate", false)
+	end
+	if not originalIds then
+		return setStatus("Chưa có dữ liệu animation gốc", false)
+	end
+	for _, s in ipairs(SLOTS) do
+		local id = originalIds[s[3]]
+		if id then
+			local f = animate:FindFirstChild(s[1])
+			local a = f and f:FindFirstChild(s[2])
+			if a then a.AnimationId = id end
+		end
+	end
+	refreshAnimate(hum, animate)
+	currentPack = nil
+	setStatus("Đã reset về animation gốc của bạn", true)
+end
+
+local function stopEmote()
+	if emoteConn then emoteConn:Disconnect() emoteConn = nil end
+	if emoteTrack then emoteTrack:Stop() emoteTrack = nil end
+end
+
+local emoteToken = 0
+local function playEmote(name, id)
+	local _, hum = getChar()
+	if not hum then return setStatus("Không tìm thấy Humanoid", false) end
+	if hum.RigType ~= Enum.HumanoidRigType.R15 then
+		return setStatus("Cần nhân vật R15", false)
+	end
+	local animator = hum:FindFirstChildOfClass("Animator") or Instance.new("Animator", hum)
+	stopEmote()
+	emoteToken += 1
+	local myToken = emoteToken
+
+	local anim = Instance.new("Animation")
+	anim.AnimationId = url(id)
+	local ok, track = pcall(function() return animator:LoadAnimation(anim) end)
+	if not ok or not track then return setStatus("Không tải được emote", false) end
+
+	setStatus("Đang tải: " .. name .. "...", true)
+	local t0 = tick()
+	repeat task.wait() until track.Length > 0 or tick() - t0 > 2
+	if myToken ~= emoteToken then track:Destroy() return end
+	if track.Length <= 0 then
+		track:Destroy()
+		return setStatus("ID không hợp lệ: " .. name, false)
+	end
+
+	track.Priority = Enum.AnimationPriority.Action
+	track.Looped = true
+	track:Play()
+	emoteTrack = track
+	setStatus("Đang chạy: " .. name .. " (di chuyển để dừng)", true)
+	emoteConn = hum.Running:Connect(function(speed)
+		if speed > 0.5 then stopEmote() setStatus("Đã dừng emote", true) end
+	end)
+end
+
+-- Respawn: lưu animation gốc mới rồi áp dụng lại pack đang chọn
+lp.CharacterAdded:Connect(function(char)
+	stopEmote()
+	local animate = char:WaitForChild("Animate", 10)
+	char:WaitForChild("Humanoid", 10)
+	if not animate then return end
+	task.wait(0.3)
+	snapshotOriginal(char)
+	if currentPack then
+		task.wait(0.2)
+		applyPack(currentPack, true)
+	end
+end)
+task.spawn(function()
+	local c = lp.Character
+	if c and c:WaitForChild("Animate", 10) then snapshotOriginal(c) end
+end)
+
+----------------------------------------------------------------
+-- TÌM EMOTE ONLINE
+----------------------------------------------------------------
+local onlineResults, onlineFor = {}, ""
+
+local function getRequest()
+	return (syn and syn.request) or http_request or request or (fluxus and fluxus.request)
+end
+
+local rebuild -- khai báo trước
+
+local function onlineSearch(q)
+	local req = getRequest()
+	if not req then return setStatus("Executor không hỗ trợ request", false) end
+	setStatus("Đang tìm online: " .. q .. "...", true)
+	task.spawn(function()
+		local link = "https://catalog.roblox.com/v1/search/items/details?Keyword="
+			.. HttpService:UrlEncode(q .. " emote") .. "&Limit=30"
+		local ok, res = pcall(req, { Url = link, Method = "GET" })
+		if not ok or not res or res.StatusCode ~= 200 then
+			return setStatus("Tìm online thất bại", false)
+		end
+		local ok2, data = pcall(function() return HttpService:JSONDecode(res.Body) end)
+		if not ok2 or type(data) ~= "table" then
+			return setStatus("Dữ liệu trả về không hợp lệ", false)
+		end
+		local out = {}
+		for _, it in ipairs(data.data or {}) do
+			if it.assetType == 61 and it.id and it.name then
+				table.insert(out, { it.name, it.id })
+			end
+		end
+		onlineResults, onlineFor = out, q
+		rebuild()
+		setStatus(#out > 0 and ("Tìm thấy " .. #out .. " emote online") or "Không có kết quả online", #out > 0)
+	end)
+end
+
+----------------------------------------------------------------
+-- GIAO DIỆN
+----------------------------------------------------------------
+local C = {
+	bg = Color3.fromRGB(24, 24, 32),
+	bar = Color3.fromRGB(34, 34, 46),
+	item = Color3.fromRGB(44, 44, 60),
+	accent = Color3.fromRGB(110, 90, 255),
+	red = Color3.fromRGB(200, 70, 80),
+	text = Color3.fromRGB(235, 235, 245),
+	sub = Color3.fromRGB(150, 150, 170),
+}
+
+local function new(class, props, parent)
+	local o = Instance.new(class)
+	for k, v in pairs(props) do o[k] = v end
+	if parent then o.Parent = parent end
+	return o
+end
+local function corner(o, r) new("UICorner", { CornerRadius = UDim.new(0, r or 8) }, o) end
+
+local gui = new("ScreenGui", { Name = "AnimHubGui", ResetOnSpawn = false, ZIndexBehavior = Enum.ZIndexBehavior.Sibling, DisplayOrder = 999 })
+local okParent = pcall(function() gui.Parent = (gethui and gethui()) or game:GetService("CoreGui") end)
+if not okParent or not gui.Parent then gui.Parent = lp:WaitForChild("PlayerGui") end
+
+-- Khoá di chuyển (hub + nút AE)
+local locked = false
+
+local function makeDraggable(handle, target, onMoved)
+	local dragging, startIn, startPos = false, nil, nil
+	handle.InputBegan:Connect(function(i)
+		if locked then return end
+		if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+			dragging, startIn, startPos = true, i.Position, target.Position
+			i.Changed:Connect(function()
+				if i.UserInputState == Enum.UserInputState.End then dragging = false end
+			end)
+		end
+	end)
+	UIS.InputChanged:Connect(function(i)
+		if locked then dragging = false return end
+		if dragging and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then
+			local d = i.Position - startIn
+			if onMoved and d.Magnitude > 6 then onMoved() end
+			target.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X, startPos.Y.Scale, startPos.Y.Offset + d.Y)
+		end
+	end)
+end
+
+-- Cửa sổ chính
+local main = new("Frame", {
+	Size = UDim2.fromOffset(310, 390), Position = UDim2.new(0.5, -155, 0.5, -195),
+	BackgroundColor3 = C.bg, BorderSizePixel = 0, ClipsDescendants = true,
+}, gui)
+corner(main, 12)
+new("UIStroke", { Color = C.accent, Thickness = 1.5, Transparency = 0.3 }, main)
+
+local titleBar = new("Frame", { Size = UDim2.new(1, 0, 0, 38), BackgroundColor3 = C.bar, BorderSizePixel = 0 }, main)
+new("TextLabel", {
+	Size = UDim2.new(1, -84, 1, 0), Position = UDim2.fromOffset(44, 0), BackgroundTransparency = 1,
+	Text = "Anim Hub  •  Roblox Classic", TextColor3 = C.text, Font = Enum.Font.GothamBold,
+	TextSize = 14, TextXAlignment = Enum.TextXAlignment.Left,
+}, titleBar)
+
+local lockBtn = new("TextButton", {
+	Size = UDim2.fromOffset(28, 28), Position = UDim2.fromOffset(8, 5), BackgroundColor3 = C.item,
+	Text = "🔓", TextColor3 = Color3.new(1, 1, 1), Font = Enum.Font.GothamBold, TextSize = 14, AutoButtonColor = true,
+}, titleBar)
+corner(lockBtn, 8)
+
+local closeBtn = new("TextButton", {
+	Size = UDim2.fromOffset(28, 28), Position = UDim2.new(1, -34, 0, 5), BackgroundColor3 = Color3.fromRGB(220, 70, 80),
+	Text = "–", TextColor3 = Color3.new(1, 1, 1), Font = Enum.Font.GothamBold, TextSize = 18, AutoButtonColor = true,
+}, titleBar)
+corner(closeBtn, 8)
+makeDraggable(titleBar, main)
+
+-- Tabs
+local tabRow = new("Frame", { Size = UDim2.new(1, -20, 0, 32), Position = UDim2.fromOffset(10, 46), BackgroundTransparency = 1 }, main)
+new("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 8) }, tabRow)
+local function tabButton(text)
+	local b = new("TextButton", {
+		Size = UDim2.new(0.5, -4, 1, 0), BackgroundColor3 = C.item, Text = text, TextColor3 = C.sub,
+		Font = Enum.Font.GothamBold, TextSize = 13, AutoButtonColor = false,
+	}, tabRow)
+	corner(b, 8)
+	return b
+end
+local tabAnim = tabButton("Animation Pack")
+local tabEmote = tabButton("Emote")
+
+-- Ô tìm kiếm
+local search = new("TextBox", {
+	Size = UDim2.new(1, -20, 0, 30), Position = UDim2.fromOffset(10, 86), BackgroundColor3 = C.item,
+	PlaceholderText = "Tìm kiếm...", PlaceholderColor3 = C.sub, Text = "", TextColor3 = C.text,
+	Font = Enum.Font.Gotham, TextSize = 13, ClearTextOnFocus = false,
+}, main)
+corner(search, 8)
+
+-- Danh sách
+local list = new("ScrollingFrame", {
+	Size = UDim2.new(1, -20, 1, -194), Position = UDim2.fromOffset(10, 124), BackgroundTransparency = 1,
+	BorderSizePixel = 0, ScrollBarThickness = 4, ScrollBarImageColor3 = C.accent,
+	CanvasSize = UDim2.new(), AutomaticCanvasSize = Enum.AutomaticSize.Y,
+}, main)
+new("UIListLayout", { Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder }, list)
+
+-- Nút hành động dưới cùng: Reset (tab Animation) / Dừng emote (tab Emote)
+local actionBtn = new("TextButton", {
+	Size = UDim2.new(1, -20, 0, 30), Position = UDim2.new(0, 10, 1, -66), BackgroundColor3 = C.red,
+	Text = "", TextColor3 = Color3.new(1, 1, 1), Font = Enum.Font.GothamBold, TextSize = 13,
+}, main)
+corner(actionBtn, 8)
+
+statusLabel = new("TextLabel", {
+	Size = UDim2.new(1, -20, 0, 24), Position = UDim2.new(0, 10, 1, -30), BackgroundTransparency = 1,
+	Text = "Sẵn sàng", TextColor3 = Color3.fromRGB(110, 220, 140), Font = Enum.Font.Gotham,
+	TextSize = 12, TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
+}, main)
+
+-- Xây danh sách theo tab
+local activeTab = "anim"
+local selectedBtn
+
+local function addButton(text, order, color, cb)
+	local b = new("TextButton", {
+		Size = UDim2.new(1, -6, 0, 34), BackgroundColor3 = color or C.item, Text = text, TextColor3 = C.text,
+		Font = Enum.Font.Gotham, TextSize = 13, AutoButtonColor = true, LayoutOrder = order,
+	}, list)
+	corner(b, 8)
+	b.MouseButton1Click:Connect(function() cb(b) end)
+	return b
+end
+
+function rebuild()
+	for _, c in ipairs(list:GetChildren()) do
+		if c:IsA("GuiButton") then c:Destroy() end
+	end
+	selectedBtn = nil
+	local raw = search.Text
+	local q = string.lower(raw)
+
+	search.PlaceholderText = activeTab == "emote" and "Nhập tên emote (Enter = tìm online)" or "Tìm animation pack..."
+	actionBtn.Text = activeTab == "emote" and "Dừng emote" or "Reset về animation gốc"
+
+	tabAnim.BackgroundColor3 = activeTab == "anim" and C.accent or C.item
+	tabAnim.TextColor3 = activeTab == "anim" and Color3.new(1, 1, 1) or C.sub
+	tabEmote.BackgroundColor3 = activeTab == "emote" and C.accent or C.item
+	tabEmote.TextColor3 = activeTab == "emote" and Color3.new(1, 1, 1) or C.sub
+
+	if activeTab == "anim" then
+		for i, d in ipairs(PACKS) do
+			if q == "" or string.find(string.lower(d.name), q, 1, true) then
+				local isCur = currentPack == d
+				local b = addButton(d.name, i, isCur and C.accent or C.item, function(btn)
+					if selectedBtn then selectedBtn.BackgroundColor3 = C.item end
+					btn.BackgroundColor3 = C.accent
+					selectedBtn = btn
+					applyPack(d)
+				end)
+				if isCur then selectedBtn = b end
+			end
+		end
+	else
+		local order = 0
+		local trimmed = raw:gsub("^%s+", ""):gsub("%s+$", "")
+		if trimmed ~= "" then
+			order += 1
+			if trimmed:match("^%d+$") then
+				addButton("▶ Phát ID " .. trimmed, order, C.accent, function()
+					playEmote("ID " .. trimmed, tonumber(trimmed))
+				end)
+			else
+				addButton("🌐 Tìm online: " .. trimmed, order, C.accent, function()
+					onlineSearch(trimmed)
+				end)
+			end
+		end
+		for _, d in ipairs(EMOTES) do
+			if q == "" or string.find(string.lower(d[1]), q, 1, true) then
+				order += 1
+				addButton(d[1], order, C.item, function() playEmote(d[1], d[2]) end)
+			end
+		end
+		if q ~= "" and onlineFor == raw then
+			for _, d in ipairs(onlineResults) do
+				order += 1
+				addButton("🌐 " .. d[1], order, C.item, function() playEmote(d[1], d[2]) end)
+			end
+		end
+	end
+end
+
+actionBtn.MouseButton1Click:Connect(function()
+	if activeTab == "emote" then
+		emoteToken += 1
+		stopEmote()
+		setStatus("Đã dừng emote", true)
+	else
+		resetToOriginal()
+		rebuild()
+	end
+end)
+
+tabAnim.MouseButton1Click:Connect(function() activeTab = "anim" rebuild() end)
+tabEmote.MouseButton1Click:Connect(function() activeTab = "emote" rebuild() end)
+search:GetPropertyChangedSignal("Text"):Connect(rebuild)
+search.FocusLost:Connect(function(enter)
+	local t = search.Text:gsub("^%s+", ""):gsub("%s+$", "")
+	if enter and activeTab == "emote" and t ~= "" and not t:match("^%d+$") then
+		onlineSearch(t)
+	end
+end)
+rebuild()
+
+-- Nút nhỏ AE (bấm để ẩn/hiện)
+local toggle = new("TextButton", {
+	Size = UDim2.fromOffset(46, 46), Position = UDim2.new(0, 14, 0.5, -23), BackgroundColor3 = C.accent,
+	Text = "AE", TextColor3 = Color3.new(1, 1, 1), Font = Enum.Font.GothamBlack, TextSize = 16, AutoButtonColor = true,
+}, gui)
+corner(toggle, 23)
+new("UIStroke", { Color = Color3.new(1, 1, 1), Thickness = 1.5, Transparency = 0.5 }, toggle)
+
+local moved = false
+makeDraggable(toggle, toggle, function() moved = true end)
+
+local visible = true
+local function setVisible(v)
+	visible = v
+	main.Visible = v
+end
+toggle.MouseButton1Click:Connect(function()
+	if moved then moved = false return end
+	setVisible(not visible)
+end)
+toggle.InputEnded:Connect(function() task.delay(0.05, function() moved = false end) end)
+closeBtn.MouseButton1Click:Connect(function() setVisible(false) end)
+
+lockBtn.MouseButton1Click:Connect(function()
+	locked = not locked
+	lockBtn.Text = locked and "🔒" or "🔓"
+	lockBtn.BackgroundColor3 = locked and C.accent or C.item
+	setStatus(locked and "Đã khoá vị trí hub & nút AE" or "Đã mở khoá, có thể kéo thả", true)
+end)
+
+UIS.InputBegan:Connect(function(i, gp)
+	if not gp and i.KeyCode == Enum.KeyCode.RightControl then setVisible(not visible) end
+end)
+
+setStatus("Sẵn sàng • Nút AE để ẩn/hiện", true)
